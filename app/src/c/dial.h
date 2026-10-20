@@ -23,6 +23,13 @@ int32_t dial_minute_angle(int label_minute, int minute);
 // False for ring labels close enough to the pointer box to be half covered.
 bool dial_minute_label_visible(int label_minute, int minute);
 
+// Like dial_minute_angle, but signed: negative for labels left of the pointer.
+int32_t dial_minute_offset(int label_minute, int minute);
+
+// Moves a signed label offset that sits within `clearance` of the pointer out
+// to `clearance` on the same side. Zero (the pointer itself) is left alone.
+int32_t dial_clear_pointer(int32_t offset, int32_t clearance);
+
 // Clockwise angle of hour ring slot `slot`.
 int32_t dial_hour_angle(int slot);
 

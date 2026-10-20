@@ -72,30 +72,47 @@ static uint8_t prv_blend(uint8_t bg, uint8_t fg, int coverage) {
   return out;
 }
 
+// Lays the label out in atlas pixels. Returns the digit count and sets `width`.
+static int prv_layout(const char *digits, const Glyph **glyphs, int *starts, int *width) {
+  int count = 0;
+  int gap = s_height * 8 / 100;
+  *width = 0;
+  for (const char *c = digits; *c && count < MAX_LABEL_DIGITS; c++) {
+    if (*c < '0' || *c > '9') {
+      continue;
+    }
+    if (count > 0) {
+      *width += gap;
+    }
+    glyphs[count] = &s_glyphs[*c - '0'];
+    starts[count] = *width;
+    *width += glyphs[count]->width;
+    count++;
+  }
+  return count;
+}
+
+int numerals_width(const char *digits, int digit_height) {
+  if (!s_blob || digit_height <= 0) {
+    return 0;
+  }
+  const Glyph *glyphs[MAX_LABEL_DIGITS];
+  int starts[MAX_LABEL_DIGITS];
+  int width = 0;
+  prv_layout(digits, glyphs, starts, &width);
+  return (width * digit_height + s_height - 1) / s_height;
+}
+
 void numerals_draw(GBitmap *fb, const char *digits, GPoint center_q4, int32_t angle,
                    int digit_height, GColor color) {
   if (!s_blob || !fb || digit_height <= 0) {
     return;
   }
 
-  // Lay the label out in atlas pixels.
   const Glyph *glyphs[MAX_LABEL_DIGITS];
   int starts[MAX_LABEL_DIGITS];
-  int count = 0;
-  int gap = s_height * 8 / 100;
   int width = 0;
-  for (const char *c = digits; *c && count < MAX_LABEL_DIGITS; c++) {
-    if (*c < '0' || *c > '9') {
-      continue;
-    }
-    if (count > 0) {
-      width += gap;
-    }
-    glyphs[count] = &s_glyphs[*c - '0'];
-    starts[count] = width;
-    width += glyphs[count]->width;
-    count++;
-  }
+  int count = prv_layout(digits, glyphs, starts, &width);
   if (count == 0) {
     return;
   }
