@@ -1,0 +1,47 @@
+{
+  "name": "roto360-reimaged",
+  "author": "chidmdxx",
+  "version": "1.0.0",
+  "private": true,
+  "pebble": {
+    "displayName": "Roto360 reimaged",
+    "uuid": "702a0ec9-6bd7-42d4-8bea-64d86615e312",
+    "sdkVersion": "3",
+    "enableMultiJS": false,
+    "targetPlatforms": ["basalt", "chalk", "emery", "gabbro"],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [],
+    "resources": {
+      "media": [
+        {
+          "type": "raw",
+          "name": "DIGITS",
+          "file": "data/digits.bin"
+        },
+        {
+          "type": "font",
+          "name": "FONT_BEBAS_16",
+          "file": "fonts/BebasNeue-Regular.ttf",
+          "characterRegex": "[A-Z0-9%+ ]",
+          "targetPlatforms": ["basalt", "chalk"]
+        },
+        {
+          "type": "font",
+          "name": "FONT_BEBAS_20",
+          "file": "fonts/BebasNeue-Regular.ttf",
+          "characterRegex": "[A-Z0-9%+ ]",
+          "targetPlatforms": ["emery"]
+        },
+        {
+          "type": "font",
+          "name": "FONT_BEBAS_22",
+          "file": "fonts/BebasNeue-Regular.ttf",
+          "characterRegex": "[A-Z0-9%+ ]",
+          "targetPlatforms": ["gabbro"]
+        }
+      ]
+    }
+  }
+}

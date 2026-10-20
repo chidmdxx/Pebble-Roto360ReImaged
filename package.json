@@ -1,0 +1,11 @@
+{
+  "name": "pebble-roto360-reimaged",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
