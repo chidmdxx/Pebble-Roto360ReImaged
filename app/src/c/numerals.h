@@ -9,5 +9,8 @@ void numerals_unload(void);
 // clockwise by `angle` so the top of the text faces outward on a dial. The
 // glyphs are `digit_height` pixels tall and antialiased against whatever is
 // already in the frame buffer. Only colour (8-bit) frame buffers are supported.
+// Width in screen pixels of `digits` drawn `digit_height` pixels tall.
+int numerals_width(const char *digits, int digit_height);
+
 void numerals_draw(GBitmap *fb, const char *digits, GPoint center_q4, int32_t angle,
                    int digit_height, GColor color);
