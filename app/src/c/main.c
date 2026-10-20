@@ -89,6 +89,21 @@ static void prv_fill_track(GContext *ctx, GPoint c, DialTrack t, GColor color) {
   }
 }
 
+#if PBL_DISPLAY_WIDTH >= 200
+// Perimeter of `track` in 1/16 pixel units, matching prv_track_walk_q4.
+static int32_t prv_track_length_q4(DialTrack track) {
+  int rc = track.corner;
+  if (rc > track.half_w) {
+    rc = track.half_w;
+  }
+  if (rc > track.half_h) {
+    rc = track.half_h;
+  }
+  int32_t arc = rc * 16 * 25736 / 16384;
+  return 4 * ((track.half_w - rc) * 16 + (track.half_h - rc) * 16 + arc);
+}
+#endif
+
 // Walks `turn` (0 to TRIG_MAX_ANGLE, clockwise from 12 o'clock) of the way
 // around `track` at constant speed. Returns the point in 1/16 pixel units and
 // sets `normal` to the outward direction there, which is how labels are
@@ -266,13 +281,32 @@ static void prv_dial_update(Layer *layer, GContext *ctx) {
 
   GBitmap *fb = s_numerals_ready ? prv_capture(ctx) : NULL;
   if (fb) {
+#if PBL_DISPLAY_WIDTH >= 200
+    // Big screens have room to keep the labels next to the pointer, moved just
+    // clear of the minute box instead of hidden.
+    int32_t track_len = prv_track_length_q4(minute_text);
+    GPoint box_edge = prv_track_point_q4(&dial, minute_text,
+                                         DEG_TO_TRIGANGLE(MINUTE_BOX_HALF_ANGLE));
+    int32_t box_half_q4 = box_edge.x - dial.center_q4.x;
+#endif
     for (int slot = 0; slot < DIAL_MINUTE_SLOTS; slot++) {
       int label = dial_minute_label(slot);
+#if PBL_DISPLAY_WIDTH >= 200
+      if (label == now->tm_min || track_len <= 0) {
+        continue;
+      }
+      char text[4];
+      snprintf(text, sizeof(text), "%02d", label);
+      int32_t clearance_q4 = box_half_q4 + (numerals_width(text, minute_h) / 2 + 2) * 16;
+      int32_t clearance = (int32_t)((int64_t)clearance_q4 * DIAL_FULL_TURN / track_len);
+      int32_t turn = dial_clear_pointer(dial_minute_offset(label, now->tm_min), clearance);
+#else
       if (!dial_minute_label_visible(label, now->tm_min)) {
         continue;
       }
-      prv_draw_label(fb, &dial, label, minute_text, dial_minute_angle(label, now->tm_min),
-                     minute_h, GColorWhite);
+      int32_t turn = dial_minute_angle(label, now->tm_min);
+#endif
+      prv_draw_label(fb, &dial, label, minute_text, turn, minute_h, GColorWhite);
     }
     for (int slot = 1; slot < DIAL_HOUR_SLOTS; slot++) {
       prv_draw_label(fb, &dial, dial_hour_label(now->tm_hour, slot, is_24h), hour_text,
