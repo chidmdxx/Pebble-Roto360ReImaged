@@ -1,0 +1,15 @@
+Roto360 reimaged
+
+An independent watchface inspired by Roto360 by MicroByte. It contains no
+code, images, fonts or other files from the original app. No license for the
+original was found, and none is claimed for it here. The rings, shield, store
+icons and banners are drawn by this project's own code.
+
+Bebas Neue
+Copyright 2010 by Dharma Type
+(from https://github.com/google/fonts/tree/main/ofl/bebasneue)
+Licensed under the SIL Open Font License, Version 1.1; see
+app/resources/fonts/OFL.txt.
+
+Used files: app/resources/fonts/BebasNeue-Regular.ttf, plus the derived digit
+atlas app/resources/data/digits.bin, which tools/gen_digits.py renders from it.

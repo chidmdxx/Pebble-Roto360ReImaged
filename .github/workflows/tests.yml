@@ -1,0 +1,105 @@
+name: Tests and Pebble build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install checksum-pinned Gitleaks
+        env:
+          GITLEAKS_VERSION: '8.30.1'
+          GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+        run: |
+          ARCHIVE="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "$ARCHIVE"
+          printf '%s  %s\n' "$GITLEAKS_SHA256" "$ARCHIVE" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/gitleaks-bin"
+          tar --extract --gzip --file "$ARCHIVE" --directory "$RUNNER_TEMP/gitleaks-bin" \
+            --no-same-owner --no-same-permissions gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+      - name: Scan history without PR-supplied suppressions
+        run: |
+          git rev-parse --verify HEAD
+          printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
+          : > "$RUNNER_TEMP/empty.gitleaksignore"
+          gitleaks git --no-banner --redact=100 --ignore-gitleaks-allow \
+            --config "$RUNNER_TEMP/gitleaks.toml" \
+            --gitleaks-ignore-path "$RUNNER_TEMP/empty.gitleaksignore" \
+            --log-opts="--all" .
+
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: npm test
+
+  build:
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install Pebble CLI and SDK
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pebble"
+          "$RUNNER_TEMP/pebble/bin/pip" install pebble-tool==5.0.40
+          echo "$RUNNER_TEMP/pebble/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/pebble/bin/pebble" sdk install 4.33.1
+      - name: Build every supported platform
+        working-directory: app
+        run: pebble build
+      - name: Verify bundled targets
+        run: |
+          python3 - <<'PY'
+          import json
+          import zipfile
+
+          with open('app/package.json') as file:
+              package = json.load(file)
+              targets = set(package['pebble']['targetPlatforms'])
+          with zipfile.ZipFile('app/build/app.pbw') as bundle:
+              binaries = {name.split('/')[0] for name in bundle.namelist()
+                          if name.endswith('/pebble-app.bin')}
+              assert binaries == targets, (binaries, targets)
+              info = json.loads(bundle.read('appinfo.json'))
+              assert info['versionLabel'] == package['version']
+              assert info['uuid'] == package['pebble']['uuid']
+          PY
+      - name: Name release package
+        run: |
+          VERSION=$(node -p "require('./app/package.json').version")
+          cp app/build/app.pbw "app/build/Roto360Reimaged-${VERSION}.pbw"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: roto360-reimaged-all-watches
+          path: app/build/Roto360Reimaged-*.pbw
+          if-no-files-found: error
+          retention-days: 30

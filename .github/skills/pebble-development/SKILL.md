@@ -1,0 +1,48 @@
+---
+name: pebble-development
+description: Build, review, and test Roto360 reimaged, a C Pebble watchface with a rotating hour and minute dial. Use when changing dial layout, the rotated digit renderer, fonts or atlas, supported watches, store assets, or SDK build instructions. Keep emulator checks separate from physical-watch behavior.
+compatibility: Node.js 22 or later, GCC or Clang, Python 3 with Pillow for the tools, Pebble CLI 5.0.40 and SDK 4.33.1. Use WSL on Windows.
+---
+
+# Pebble development
+
+## Read the relevant source and live docs
+
+Start with `README.md`, `app/package.json`, and `.github/workflows/tests.yml`. This is a C watchface with no phone-side JavaScript; do not add PebbleKit JS, Alloy, a settings page, or network access without an owner decision.
+
+Fetch only the official pages needed for the change. Use their Markdown versions instead of copying a documentation snapshot:
+
+- [Agent guidance](https://developer.repebble.com/guides/ai-agents.md) and [documentation index](https://developer.repebble.com/llms.txt).
+- [Building for every Pebble](https://developer.repebble.com/guides/best-practices/building-for-every-pebble.md).
+- [Graphics and drawing](https://developer.repebble.com/guides/graphics-and-animations/drawing-primitives-images-and-text.md) and [framebuffer access](https://developer.repebble.com/guides/graphics-and-animations/framebuffer-graphics.md).
+- [Event services](https://developer.repebble.com/guides/events-and-services/events.md) for tick and battery updates.
+- [SDK setup](https://developer.repebble.com/sdk.md).
+
+Pebble's [upstream watchface agent skill](https://github.com/coredevices/pebble-watchface-agent-skill) is an optional reference for the build, emulator, and screenshot loop, not a vendored dependency. These instructions are project-owned. Where it defaults to `emery`, this project treats `gabbro` (Pebble Round 2, 260x260) as the primary target.
+
+## Preserve the app's boundaries
+
+- Keep the targets `basalt`, `chalk`, `emery`, and `gabbro`. Round screens draw circular rings; rectangular screens draw a rounded-square bezel through the same `DialTrack` geometry. Check both shapes after layout changes.
+- Keep pure logic in `app/src/c/dial.c` with no SDK includes so the host tests can build it.
+- Draw rotated numerals through `numerals.c` and the generated atlas, not runtime bitmap scaling. After changing `tools/gen_digits.py` or the font, regenerate `app/resources/data/digits.bin` and confirm `python3 tools/gen_digits.py --check` passes.
+- Use only original code and art, or assets with a compatible license recorded in `NOTICE`. Do not copy, trace, or extract files from the original Roto360.
+- Keep the app UUID unchanged so updates replace earlier builds of this face, never the original.
+
+## Verify the changed behavior
+
+Run `npm test` from the root. It builds the dial logic natively with GCC or Clang and checks resources and store assets.
+
+For app, resource, or build changes, run from `app`:
+
+```text
+pebble build
+pebble install --emulator gabbro
+pebble emu-set-time --emulator gabbro 1794126000
+pebble screenshot --no-open --emulator gabbro screenshot.png
+```
+
+Use a temporary output location for screenshots. Cover 12-hour and 24-hour modes (`pebble emu-time-format`), low, full and charging battery (`pebble emu-battery`), and the 11:59, 23:59 and midnight rollovers. Check that numerals stay legible and are not clipped at the screen edge. One Round 2 capture does not cover the other watches.
+
+Regenerate the store set with `python3 tools/make_store_assets.py store/screenshots store` after replacing screenshots. Screenshots must match each display's size exactly.
+
+Do not install on a physical watch, publish to the store, change authentication, reset emulator data, or rewrite Git history as an automatic cleanup step. Obtain explicit authorization for those actions. Reuse an authorized SDK profile without reading its secrets.
