@@ -57,6 +57,16 @@ static void test_minute_ring(void) {
   CHECK(!dial_minute_label_visible(55, 57));
   CHECK(dial_minute_label_visible(55, 58));
   CHECK(dial_minute_label_visible(50, 57));
+  CHECK(dial_minute_offset(5, 3) == DIAL_FULL_TURN * 2 / 60);
+  CHECK(dial_minute_offset(0, 3) == dial_minute_angle(0, 3) - DIAL_FULL_TURN);
+  CHECK(dial_minute_offset(0, 3) < 0);
+  CHECK(dial_minute_offset(33, 3) == DIAL_FULL_TURN / 2);
+  CHECK(dial_minute_offset(35, 3) < 0);
+  CHECK(dial_clear_pointer(100, 3000) == 3000);
+  CHECK(dial_clear_pointer(-100, 3000) == -3000);
+  CHECK(dial_clear_pointer(5000, 3000) == 5000);
+  CHECK(dial_clear_pointer(-5000, 3000) == -5000);
+  CHECK(dial_clear_pointer(0, 3000) == 0);
 }
 
 static void test_text(void) {

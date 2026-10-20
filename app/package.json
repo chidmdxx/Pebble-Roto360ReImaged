@@ -1,7 +1,7 @@
 {
   "name": "roto360-reimaged",
   "author": "chidmdxx",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "pebble": {
     "displayName": "Roto360 reimaged",
