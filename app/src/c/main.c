@@ -4,15 +4,26 @@
 #include "numerals.h"
 
 #if PBL_DISPLAY_WIDTH >= 260
-#define CENTER_FONT RESOURCE_ID_FONT_BEBAS_22
-#define CENTER_LINE 24
-#elif PBL_DISPLAY_WIDTH >= 200
 #define CENTER_FONT RESOURCE_ID_FONT_BEBAS_20
-#define CENTER_LINE 21
+#define CENTER_FONT_SIZE 20
+#define CENTER_CAP_HEIGHT 14
+#elif PBL_DISPLAY_WIDTH >= 200
+#define CENTER_FONT RESOURCE_ID_FONT_BEBAS_18
+#define CENTER_FONT_SIZE 18
+#define CENTER_CAP_HEIGHT 13
+#elif defined(PBL_ROUND)
+#define CENTER_FONT RESOURCE_ID_FONT_BEBAS_14
+#define CENTER_FONT_SIZE 14
+#define CENTER_CAP_HEIGHT 10
 #else
-#define CENTER_FONT RESOURCE_ID_FONT_BEBAS_16
-#define CENTER_LINE 17
+#define CENTER_FONT RESOURCE_ID_FONT_BEBAS_12
+#define CENTER_FONT_SIZE 12
+#define CENTER_CAP_HEIGHT 9
 #endif
+#define CENTER_GAP 2
+#define SETTINGS_KEY_SECONDS 1
+#define SETTINGS_KEY_STEP_GOAL 2
+#define SECONDS_GLANCE_MS 10000
 
 // Ring proportions, as fractions of the dial radius in 1/1000ths.
 #define RIM_INNER 945
@@ -41,6 +52,18 @@ static Window *s_window;
 static Layer *s_dial_layer;
 static GFont s_center_font;
 static bool s_numerals_ready;
+static DialSecondsMode s_seconds_mode = DialSecondsAlways;
+static AppTimer *s_seconds_timer;
+static bool s_glance_active;
+static bool s_in_focus = true;
+static bool s_second_ticks;
+static int32_t s_step_goal = DIAL_STEP_GOAL_DEFAULT;
+static int32_t s_steps;
+static bool s_steps_available;
+static bool s_steps_initialized;
+#if defined(PBL_HEALTH)
+static bool s_health_subscribed;
+#endif
 
 typedef struct {
   GPoint center;
@@ -169,6 +192,34 @@ static GPoint prv_q4_to_px(GPoint p) {
   return GPoint((p.x + 8) >> 4, (p.y + 8) >> 4);
 }
 
+static void prv_draw_step_progress(GContext *ctx, const Dial *dial) {
+  DialTrack track = dial_track_inset(dial->outer, 2);
+  int32_t start = DEG_TO_TRIGANGLE(SHIELD_HALF_ANGLE);
+  int32_t sweep = dial_step_progress(s_steps, s_step_goal);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_context_set_stroke_color(ctx, GColorGreen);
+  if (!s_steps_available) {
+    // An amber dash means unavailable Health data, not zero steps.
+    start = DEG_TO_TRIGANGLE(178);
+    sweep = DEG_TO_TRIGANGLE(4);
+    graphics_context_set_stroke_color(ctx, GColorOrange);
+  }
+  if (sweep == 0) {
+    return;
+  }
+  GPoint previous = prv_q4_to_px(prv_track_point_q4(dial, track, start));
+  int32_t end = start + sweep;
+  for (int32_t angle = start; angle < end;) {
+    angle += DEG_TO_TRIGANGLE(2);
+    if (angle > end) {
+      angle = end;
+    }
+    GPoint next = prv_q4_to_px(prv_track_point_q4(dial, track, angle));
+    graphics_draw_line(ctx, previous, next);
+    previous = next;
+  }
+}
+
 // Fills the wedge between two tracks, centred on 12 o'clock.
 static void prv_fill_sector(GContext *ctx, const Dial *dial, DialTrack outer, DialTrack inner,
                             int half_deg, GColor color) {
@@ -235,12 +286,13 @@ static void prv_draw_center(GContext *ctx, GRect bounds, const struct tm *now) {
   GColor colors[] = { GColorWhite, battery_color, GColorWhite };
   GPoint center = grect_center_point(&bounds);
   int box_w = bounds.size.w;
-  int font_h = CENTER_LINE + 6;
   for (int i = 0; i < 3; i++) {
-    // The font's cap height sits low in its line box, so nudge each line up.
-    int y = center.y + (i - 1) * CENTER_LINE - font_h / 2 - CENTER_LINE / 5;
+    // Bebas capitals occupy [font size - cap height, font size) in the SDK font.
+    int y = center.y + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, i)
+            - (CENTER_FONT_SIZE - CENTER_CAP_HEIGHT);
     graphics_context_set_text_color(ctx, colors[i]);
-    graphics_draw_text(ctx, lines[i], s_center_font, GRect(bounds.origin.x, y, box_w, font_h),
+    graphics_draw_text(ctx, lines[i], s_center_font,
+                       GRect(bounds.origin.x, y, box_w, CENTER_FONT_SIZE + 2),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
 }
@@ -278,6 +330,7 @@ static void prv_dial_update(Layer *layer, GContext *ctx) {
   prv_fill_track(ctx, dial.center, rim_in, COLOR_HOUR_BAND);
   prv_fill_track(ctx, dial.center, hour_in, COLOR_MINUTE_BAND);
   prv_fill_track(ctx, dial.center, minute_in, COLOR_CENTER);
+  prv_draw_step_progress(ctx, &dial);
 
   GBitmap *fb = s_numerals_ready ? prv_capture(ctx) : NULL;
   if (fb) {
@@ -329,17 +382,176 @@ static void prv_dial_update(Layer *layer, GContext *ctx) {
   }
 
   prv_draw_center(ctx, bounds, now);
+  if (dial_seconds_visible(s_seconds_mode, s_glance_active) && s_in_focus) {
+    int32_t angle = dial_second_angle(now->tm_sec);
+    int length = unit >= 100 ? 3 : 2;
+    GPoint outer = prv_q4_to_px(prv_track_point_q4(&dial,
+                                  dial_track_inset(minute_in, 1), angle));
+    GPoint inner = prv_q4_to_px(prv_track_point_q4(&dial,
+                                  dial_track_inset(minute_in, 1 + length), angle));
+    graphics_context_set_stroke_color(ctx, COLOR_SHIELD_MINUTE);
+    graphics_context_set_stroke_width(ctx, 2);
+    graphics_draw_line(ctx, inner, outer);
+  }
+}
+
+static bool prv_read_steps(void) {
+  bool available = false;
+  int32_t steps = 0;
+#if defined(PBL_HEALTH)
+  time_t now = time(NULL);
+  HealthServiceAccessibilityMask access = health_service_metric_accessible(
+      HealthMetricStepCount, time_start_of_today(), now);
+  if (access & HealthServiceAccessibilityMaskAvailable) {
+    steps = health_service_sum_today(HealthMetricStepCount);
+    available = steps >= 0;
+  }
+#endif
+  bool changed = available != s_steps_available || steps != s_steps;
+  if ((!s_steps_initialized || s_steps_available) && !available) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "step data unavailable; enable Pebble Health");
+  }
+  s_steps_initialized = true;
+  s_steps_available = available;
+  s_steps = steps;
+  return changed;
+}
+
+static void prv_tick(struct tm *tick_time, TimeUnits changed);
+
+static void prv_subscribe_ticks(void) {
+  bool second_ticks = s_in_focus && dial_seconds_visible(s_seconds_mode, s_glance_active);
+  if (second_ticks == s_second_ticks) {
+    return;
+  }
+  s_second_ticks = second_ticks;
+  tick_timer_service_unsubscribe();
+  tick_timer_service_subscribe(second_ticks ? SECOND_UNIT : MINUTE_UNIT, prv_tick);
 }
 
 static void prv_tick(struct tm *tick_time, TimeUnits changed) {
   (void)tick_time;
-  (void)changed;
-  layer_mark_dirty(s_dial_layer);
+  if (changed & MINUTE_UNIT) {
+    prv_read_steps();
+  }
+  if (s_in_focus) {
+    layer_mark_dirty(s_dial_layer);
+  }
 }
 
 static void prv_battery(BatteryChargeState state) {
   (void)state;
+  if (s_in_focus) {
+    layer_mark_dirty(s_dial_layer);
+  }
+}
+
+static void prv_glance_end(void *context) {
+  (void)context;
+  s_seconds_timer = NULL;
+  s_glance_active = false;
+  prv_subscribe_ticks();
+  if (s_in_focus) {
+    layer_mark_dirty(s_dial_layer);
+  }
+}
+
+static void prv_cancel_glance(void) {
+  if (s_seconds_timer) {
+    app_timer_cancel(s_seconds_timer);
+    s_seconds_timer = NULL;
+  }
+  s_glance_active = false;
+}
+
+static void prv_tap(AccelAxisType axis, int32_t direction) {
+  (void)axis;
+  (void)direction;
+  if (s_seconds_mode != DialSecondsOnShake || !s_in_focus) {
+    return;
+  }
+  prv_cancel_glance();
+  s_seconds_timer = app_timer_register(SECONDS_GLANCE_MS, prv_glance_end, NULL);
+  if (!s_seconds_timer) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not start seconds timer");
+    s_glance_active = false;
+  } else {
+    s_glance_active = true;
+  }
+  prv_subscribe_ticks();
   layer_mark_dirty(s_dial_layer);
+}
+
+static void prv_update_seconds_mode(void) {
+  prv_cancel_glance();
+  accel_tap_service_unsubscribe();
+  if (s_seconds_mode == DialSecondsOnShake) {
+    accel_tap_service_subscribe(prv_tap);
+  }
+  prv_subscribe_ticks();
+}
+
+static void prv_focus(bool in_focus) {
+  s_in_focus = in_focus;
+  if (!in_focus) {
+    prv_cancel_glance();
+  } else {
+    prv_read_steps();
+    layer_mark_dirty(s_dial_layer);
+  }
+  prv_subscribe_ticks();
+}
+
+#if defined(PBL_HEALTH)
+static void prv_health(HealthEventType event, void *context) {
+  (void)context;
+  if (event == HealthEventSignificantUpdate || event == HealthEventMovementUpdate) {
+    if (prv_read_steps() && s_in_focus) {
+      layer_mark_dirty(s_dial_layer);
+    }
+  }
+}
+#endif
+
+static bool prv_integer_tuple(const Tuple *tuple) {
+  return (tuple->type == TUPLE_INT || tuple->type == TUPLE_UINT)
+      && tuple->length == sizeof(int32_t);
+}
+
+static void prv_inbox_received(DictionaryIterator *iter, void *context) {
+  (void)context;
+  Tuple *seconds = dict_find(iter, MESSAGE_KEY_ShowSeconds);
+  Tuple *goal = dict_find(iter, MESSAGE_KEY_StepGoal);
+  if (seconds && (!prv_integer_tuple(seconds) || seconds->value->uint32 > DialSecondsOnShake)) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid ShowSeconds setting");
+    return;
+  }
+  if (goal && (!prv_integer_tuple(goal) || !dial_step_goal_valid(goal->value->int32))) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid StepGoal setting");
+    return;
+  }
+  if (seconds) {
+    s_seconds_mode = (DialSecondsMode)seconds->value->uint32;
+    // Keep key 1 compatible with the original persisted bool (0 or 1).
+    if (persist_write_int(SETTINGS_KEY_SECONDS, s_seconds_mode) < 0) {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "could not save ShowSeconds");
+    }
+    prv_update_seconds_mode();
+  }
+  if (goal) {
+    s_step_goal = goal->value->int32;
+    if (persist_write_int(SETTINGS_KEY_STEP_GOAL, s_step_goal) < 0) {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "could not save StepGoal");
+    }
+  }
+  if (s_in_focus && (seconds || goal)) {
+    layer_mark_dirty(s_dial_layer);
+  }
+}
+
+static void prv_inbox_dropped(AppMessageResult reason, void *context) {
+  (void)context;
+  APP_LOG(APP_LOG_LEVEL_ERROR, "settings message dropped: %d", reason);
 }
 
 static void prv_window_load(Window *window) {
@@ -369,13 +581,62 @@ static void prv_init(void) {
   });
   window_stack_push(s_window, false);
 
+  if (persist_exists(SETTINGS_KEY_SECONDS)) {
+    int size = persist_get_size(SETTINGS_KEY_SECONDS);
+    int32_t mode = -1;
+    if (size == (int)sizeof(uint8_t)) {
+      uint8_t legacy = 0;
+      if (persist_read_data(SETTINGS_KEY_SECONDS, &legacy, sizeof(legacy)) == (int)sizeof(legacy)) {
+        mode = legacy;
+      }
+    } else if (size == (int)sizeof(int32_t)) {
+      mode = persist_read_int(SETTINGS_KEY_SECONDS);
+    }
+    if (mode >= DialSecondsOff && mode <= DialSecondsOnShake) {
+      s_seconds_mode = (DialSecondsMode)mode;
+    } else {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved seconds mode: %ld", (long)mode);
+    }
+  }
+  if (persist_exists(SETTINGS_KEY_STEP_GOAL)) {
+    int32_t goal = persist_read_int(SETTINGS_KEY_STEP_GOAL);
+    if (dial_step_goal_valid(goal)) {
+      s_step_goal = goal;
+    } else {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved step goal: %ld", (long)goal);
+    }
+  }
+  app_message_register_inbox_received(prv_inbox_received);
+  app_message_register_inbox_dropped(prv_inbox_dropped);
+  AppMessageResult result = app_message_open(128, 64);
+  if (result != APP_MSG_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not open settings messaging: %d", result);
+  }
+  prv_read_steps();
+#if defined(PBL_HEALTH)
+  s_health_subscribed = health_service_events_subscribe(prv_health, NULL);
+  if (!s_health_subscribed) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "could not subscribe to Health updates");
+  }
+#endif
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick);
+  prv_update_seconds_mode();
+  app_focus_service_subscribe(prv_focus);
   battery_state_service_subscribe(prv_battery);
 }
 
 static void prv_deinit(void) {
   tick_timer_service_unsubscribe();
+  prv_cancel_glance();
+  accel_tap_service_unsubscribe();
+  app_focus_service_unsubscribe();
+#if defined(PBL_HEALTH)
+  if (s_health_subscribed) {
+    health_service_events_unsubscribe();
+  }
+#endif
   battery_state_service_unsubscribe();
+  app_message_deregister_callbacks();
   window_destroy(s_window);
   fonts_unload_custom_font(s_center_font);
   numerals_unload();
