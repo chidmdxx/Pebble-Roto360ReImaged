@@ -25,7 +25,7 @@ function png(file) {
 test('the watchface targets color round and rectangular watches with its own UUID', () => {
   assert.deepEqual(app.pebble.targetPlatforms, Object.keys(DISPLAYS));
   assert.equal(app.pebble.watchapp.watchface, true);
-  assert.equal(app.pebble.enableMultiJS, false);
+  assert.equal(app.pebble.enableMultiJS, true);
   assert.equal(app.version, require('../package.json').version);
   assert.match(app.pebble.uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   // Must never reuse the original Roto360 UUID, or installing would replace it.

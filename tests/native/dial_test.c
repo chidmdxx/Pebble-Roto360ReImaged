@@ -2,6 +2,7 @@
 #include "../../app/src/c/dial.h"
 
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,11 +120,91 @@ static void test_track(void) {
   CHECK(dial_track_distance_q4(rounded, 0, 0) == 0);
 }
 
+static void test_center_layout(void) {
+  // SDK-rendered Bebas capitals: height and WEDNESDAY advance at each font size.
+  const struct {
+    DialTrack center;
+    int cap_height;
+    int weekday_width;
+  } displays[] = {
+    { { 28, 40, 8 }, 9, 44 },
+    { { 36, 36, 36 }, 10, 53 },
+    { { 40, 54, 12 }, 13, 67 },
+    { { 52, 52, 52 }, 14, 73 },
+  };
+  for (size_t i = 0; i < sizeof displays / sizeof displays[0]; i++) {
+    int height = displays[i].cap_height;
+    int top = dial_center_line_top(height, 2, 0);
+    int bottom = dial_center_line_top(height, 2, 2) + height;
+    CHECK(abs(top + bottom) <= 1);
+    CHECK(dial_center_line_top(height, 2, 1) - top == height + 2);
+    // Keep the longest weekday's upper corners clear of the seconds track.
+    double x = (displays[i].weekday_width + 1) / 2;
+    double y = top;
+    double distance = sqrt(x * x + y * y);
+    double angle = atan2(x, -y) * 180.0 / M_PI;
+    CHECK(distance * 16 < distance_at(dial_track_inset(displays[i].center, 4), angle));
+  }
+}
+
+static void test_seconds(void) {
+  CHECK(dial_second_angle(0) == 0);
+  CHECK(dial_second_angle(15) == DIAL_FULL_TURN / 4);
+  CHECK(dial_second_angle(30) == DIAL_FULL_TURN / 2);
+  CHECK(dial_second_angle(45) == DIAL_FULL_TURN * 3 / 4);
+  CHECK(dial_second_angle(60) == 0);
+  CHECK(dial_second_angle(-1) == dial_second_angle(59));
+  for (int second = 1; second < 60; second++) {
+    CHECK(dial_second_angle(second) > dial_second_angle(second - 1));
+  }
+  CHECK(!dial_seconds_visible(DialSecondsOff, false));
+  CHECK(!dial_seconds_visible(DialSecondsOff, true));
+  CHECK(dial_seconds_visible(DialSecondsAlways, false));
+  CHECK(dial_seconds_visible(DialSecondsAlways, true));
+  CHECK(!dial_seconds_visible(DialSecondsOnShake, false));
+  CHECK(dial_seconds_visible(DialSecondsOnShake, true));
+  CHECK(!dial_seconds_visible((DialSecondsMode)3, true));
+}
+
+static void test_step_progress(void) {
+  const int32_t full = DIAL_FULL_TURN * 330 / 360;
+  CHECK(dial_step_goal_valid(1));
+  CHECK(dial_step_goal_valid(DIAL_STEP_GOAL_DEFAULT));
+  CHECK(dial_step_goal_valid(DIAL_STEP_GOAL_MAX));
+  CHECK(!dial_step_goal_valid(0));
+  CHECK(!dial_step_goal_valid(-1));
+  CHECK(!dial_step_goal_valid(DIAL_STEP_GOAL_MAX + 1));
+  CHECK(!dial_step_goal_valid(INT32_MAX));
+  CHECK(dial_step_progress(0, 8000) == 0);
+  CHECK(dial_step_progress(-100, 8000) == 0);
+  CHECK(dial_step_progress(4000, 8000) == full / 2);
+  CHECK(dial_step_progress(8000, 8000) == full);
+  CHECK(dial_step_progress(16000, 8000) == full);
+  CHECK(dial_step_progress(INT32_MAX, 8000) == full);
+  CHECK(dial_step_progress(1, 1) == full);
+  CHECK(dial_step_progress(1, 0) == 0);
+  CHECK(dial_step_progress(1, -1) == 0);
+  CHECK(dial_step_progress(100, DIAL_STEP_GOAL_MAX + 1) == 0);
+  for (int goal = 1; goal <= DIAL_STEP_GOAL_MAX; goal += 997) {
+    int32_t previous = 0;
+    for (int steps = 0; steps <= goal * 2; steps += 31) {
+      int32_t progress = dial_step_progress(steps, goal);
+      CHECK(progress >= previous && progress <= full);
+      previous = progress;
+    }
+  }
+  // Health's daily total resets at midnight; the arc must reset with it.
+  CHECK(dial_step_progress(8000, 8000) > dial_step_progress(0, 8000));
+}
+
 int main(void) {
   test_hour_labels();
   test_minute_ring();
   test_text();
   test_track();
+  test_center_layout();
+  test_seconds();
+  test_step_progress();
   if (failures) {
     fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

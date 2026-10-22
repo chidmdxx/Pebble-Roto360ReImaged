@@ -74,8 +74,13 @@ installed app with contents-write permissions is a separate trust decision.
   checks vulnerable dependencies and updates actions; it does not find secrets.
   Update the pinned Gitleaks version and checksum together after reviewing its
   release; Dependabot does not update this downloaded binary.
-- The watchface has no phone-side JavaScript. Its native harness and
-  compiler checks are not a C security scan. Review the pinned Pebble CLI/SDK and their transitive Python
+- The phone-side JavaScript provides only an embedded offline settings page
+  and validates the seconds mode and daily step goal before sending them to the
+  watch. It makes no network requests and collects no account, watch or location
+  data. Step totals are read locally through Pebble Health and never sent to
+  the phone or a server; sleep data is not read. Its tests,
+  the native harness and compiler checks are not a security scan.
+  Review the pinned Pebble CLI/SDK and their transitive Python
   dependencies separately; Actions Dependabot does not maintain those tools.
 - Use a passkey or hardware-backed 2FA on the owner account, store recovery
   codes offline, and use narrowly scoped, expiring tokens. These are account
