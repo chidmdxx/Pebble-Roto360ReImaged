@@ -9,6 +9,21 @@
 
 #define DIAL_HOUR_SLOTS 12
 #define DIAL_MINUTE_SLOTS 12
+#define DIAL_STEP_GOAL_DEFAULT 8000
+#define DIAL_STEP_GOAL_MAX 100000
+
+typedef enum {
+  DialSecondsOff = 0,
+  DialSecondsAlways = 1,
+  DialSecondsOnShake = 2,
+} DialSecondsMode;
+
+bool dial_step_goal_valid(int32_t goal);
+
+// Progress along the 330-degree bezel arc; caps at the goal, never wraps.
+int32_t dial_step_progress(int32_t steps, int32_t goal);
+
+bool dial_seconds_visible(DialSecondsMode mode, bool glance_active);
 
 // Hour shown at ring slot `slot` (0 is the top, increasing clockwise).
 // Returns 0-23 in 24-hour mode and 1-12 in 12-hour mode.
@@ -32,6 +47,12 @@ int32_t dial_clear_pointer(int32_t offset, int32_t clearance);
 
 // Clockwise angle of hour ring slot `slot`.
 int32_t dial_hour_angle(int slot);
+
+// Clockwise position of the seconds marker, from 12 o'clock.
+int32_t dial_second_angle(int second);
+
+// Top of a capital-letter row relative to the centre of a three-row readout.
+int dial_center_line_top(int cap_height, int gap, int line);
 
 // Upper-case names for the centre readout. Out-of-range input returns "".
 const char *dial_day_name(int wday);

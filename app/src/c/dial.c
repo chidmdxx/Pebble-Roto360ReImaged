@@ -15,6 +15,24 @@ static int prv_mod(int value, int base) {
   return r < 0 ? r + base : r;
 }
 
+bool dial_step_goal_valid(int32_t goal) {
+  return goal > 0 && goal <= DIAL_STEP_GOAL_MAX;
+}
+
+int32_t dial_step_progress(int32_t steps, int32_t goal) {
+  if (steps <= 0 || !dial_step_goal_valid(goal)) {
+    return 0;
+  }
+  if (steps > goal) {
+    steps = goal;
+  }
+  return (int32_t)((int64_t)steps * (DIAL_FULL_TURN * 330 / 360) / goal);
+}
+
+bool dial_seconds_visible(DialSecondsMode mode, bool glance_active) {
+  return mode == DialSecondsAlways || (mode == DialSecondsOnShake && glance_active);
+}
+
 int dial_hour_label(int hour24, int slot, bool is_24h) {
   int hour = prv_mod(hour24 + slot, 24);
   if (is_24h) {
@@ -54,6 +72,14 @@ int32_t dial_clear_pointer(int32_t offset, int32_t clearance) {
 
 int32_t dial_hour_angle(int slot) {
   return (int32_t)prv_mod(slot, DIAL_HOUR_SLOTS) * DIAL_FULL_TURN / DIAL_HOUR_SLOTS;
+}
+
+int32_t dial_second_angle(int second) {
+  return (int32_t)prv_mod(second, 60) * DIAL_FULL_TURN / 60;
+}
+
+int dial_center_line_top(int cap_height, int gap, int line) {
+  return -(3 * cap_height + 2 * gap) / 2 + line * (cap_height + gap);
 }
 
 const char *dial_day_name(int wday) {

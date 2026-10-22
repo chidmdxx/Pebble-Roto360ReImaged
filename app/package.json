@@ -1,18 +1,19 @@
 {
   "name": "roto360-reimaged",
   "author": "chidmdxx",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "private": true,
   "pebble": {
     "displayName": "Roto360 reimaged",
     "uuid": "702a0ec9-6bd7-42d4-8bea-64d86615e312",
     "sdkVersion": "3",
-    "enableMultiJS": false,
+    "enableMultiJS": true,
     "targetPlatforms": ["basalt", "chalk", "emery", "gabbro"],
     "watchapp": {
       "watchface": true
     },
-    "messageKeys": [],
+    "capabilities": ["configurable", "health"],
+    "messageKeys": ["ShowSeconds", "StepGoal"],
     "resources": {
       "media": [
         {
@@ -22,21 +23,28 @@
         },
         {
           "type": "font",
-          "name": "FONT_BEBAS_16",
+          "name": "FONT_BEBAS_12",
           "file": "fonts/BebasNeue-Regular.ttf",
           "characterRegex": "[A-Z0-9%+ ]",
-          "targetPlatforms": ["basalt", "chalk"]
+          "targetPlatforms": ["basalt"]
         },
         {
           "type": "font",
-          "name": "FONT_BEBAS_20",
+          "name": "FONT_BEBAS_14",
+          "file": "fonts/BebasNeue-Regular.ttf",
+          "characterRegex": "[A-Z0-9%+ ]",
+          "targetPlatforms": ["chalk"]
+        },
+        {
+          "type": "font",
+          "name": "FONT_BEBAS_18",
           "file": "fonts/BebasNeue-Regular.ttf",
           "characterRegex": "[A-Z0-9%+ ]",
           "targetPlatforms": ["emery"]
         },
         {
           "type": "font",
-          "name": "FONT_BEBAS_22",
+          "name": "FONT_BEBAS_20",
           "file": "fonts/BebasNeue-Regular.ttf",
           "characterRegex": "[A-Z0-9%+ ]",
           "targetPlatforms": ["gabbro"]

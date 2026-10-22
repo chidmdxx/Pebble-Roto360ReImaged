@@ -13,6 +13,9 @@ The time sits under the blue shield at the top of the dial. The outer ring holds
 - Follows the watch's 12-hour or 24-hour setting. In 12-hour mode the hour ring reads 01 to 12.
 - Battery turns red at 20% or below. While charging it shows a green `+`, for example `+80%`.
 - Round watches draw circular rings. Rectangular watches draw a rounded-square bezel with the numbers running along the edges.
+- The three center lines are vertically centered as a group. Font sizes and spacing keep the full weekday, including Wednesday, clear of the minute ring on every supported watch.
+- A thin blue seconds marker travels clockwise around the edge of the center, with no number or text.
+- A green arc on the outer bezel shows today's steps toward your daily goal. It runs clockwise from the right edge of the hour shield, stays full at or above the goal, and resets with the day's step total. Rectangular watches use the same rounded-square bezel. The inner seconds track and center text remain clear.
 
 The rotated numerals come from a high-resolution atlas of Bebas Neue that the watch samples and antialiases as it draws, instead of scaling a small bitmap. That keeps them sharp at every angle on the larger screen.
 
@@ -23,7 +26,20 @@ The rotated numerals come from a high-resolution atlas of Bebas Neue that the wa
 | Pebble Time 2 | `emery` | rectangular, 200x228 |
 | Pebble Time, Time Steel | `basalt` | rectangular, 144x168 |
 
-The face redraws each minute and when the battery state changes. It has no phone companion, settings page or network access.
+Open the watchface's settings in the Pebble phone app to configure:
+
+- **Daily step goal:** a whole number from 1 to 100,000; defaults to 8,000. This changes only the watchface's target, not Pebble Health's goal.
+- **Seconds marker:** **Off**, **Always**, or **10 seconds after wrist shake / tap**. Existing on/off preferences are preserved; new installs default to Always. Shake mode shows seconds for 10 seconds after a detected gesture, then hides the marker and returns to minute ticks. Another gesture restarts that interval. Motion detection depends on the watch and is not guaranteed to match a wrist raise.
+
+Enable Pebble Health in the Pebble phone app to supply steps. The face reads today's on-watch total, listens for Health updates, and checks again each minute, including after midnight. An amber dash at the bottom of the bezel means step data is unavailable; it is not shown as zero progress. No step or sleep data is sent to the phone or a server. The settings are saved on both the phone and watch and reapplied when they reconnect.
+
+### Battery use
+
+Off and idle shake mode subscribe to minute ticks, not hidden second ticks. Always and an active shake interval update each second. Seconds also pause when a notification covers the face; shake intervals are cancelled on focus loss. Step progress uses the existing Health service rather than a separate accelerometer step counter. Battery changes and changed step totals also trigger updates.
+
+This follows Pebble's [battery guidance](https://developer.repebble.com/guides/best-practices/conserving-battery-life/): reduce wakeups, offer a seconds-off option, and limit animation to gestures. **Off** gives the fewest animation wakeups; shake mode is a compromise. The [Health guide](https://developer.repebble.com/guides/events-and-services/health/#detecting-activities) also suggests suppressing animation during detected sleep, but this face does not change seconds behavior based on sleep. Emulator checks do not measure real-watch battery life.
+
+The small phone companion provides an embedded, offline settings page. It makes no network requests and needs no hosted page or third-party packages.
 
 ## Build and install
 
@@ -56,6 +72,7 @@ The tools in `tools/` need Python 3 and Pillow:
 
 - `app/src/c/main.c`: layout, rings, shield and center text.
 - `app/src/c/dial.c`: time, label and ring geometry logic with no SDK dependency.
+- `app/src/pkjs/index.js`: offline phone settings for seconds mode and daily step goal.
 - `app/src/c/numerals.c`: draws rotated, antialiased digits from the atlas.
 - `store/`: emulator screenshots, banners and icons for the Pebble appstore.
 - `tests/`: Node.js tests and the native dial test.

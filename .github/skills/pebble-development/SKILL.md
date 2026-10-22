@@ -8,7 +8,7 @@ compatibility: Node.js 22 or later, GCC or Clang, Python 3 with Pillow for the t
 
 ## Read the relevant source and live docs
 
-Start with `README.md`, `app/package.json`, and `.github/workflows/tests.yml`. This is a C watchface with no phone-side JavaScript; do not add PebbleKit JS, Alloy, a settings page, or network access without an owner decision.
+Start with `README.md`, `app/package.json`, and `.github/workflows/tests.yml`. This is a C watchface with a small PebbleKit JS companion providing offline settings for seconds mode and daily step goal. Keep Health data on the watch; do not add network access, cloud services, or Alloy without an owner decision.
 
 Fetch only the official pages needed for the change. Use their Markdown versions instead of copying a documentation snapshot:
 
@@ -42,6 +42,8 @@ pebble screenshot --no-open --emulator gabbro screenshot.png
 ```
 
 Use a temporary output location for screenshots. Cover 12-hour and 24-hour modes (`pebble emu-time-format`), low, full and charging battery (`pebble emu-battery`), and the 11:59, 23:59 and midnight rollovers. Check that numerals stay legible and are not clipped at the screen edge. One Round 2 capture does not cover the other watches.
+
+For step progress, check zero, partial, goal and over-goal totals (`pebble emu-steps`), goal configuration and restart persistence, the midnight reset, and the unavailable-Health indicator. Progress belongs on the outer bezel, separate from the inner seconds marker. Cover seconds Off, Always and shake mode (`pebble emu-tap`), including the ten-second timeout, re-triggering and focus loss. Off and idle shake mode must use minute ticks rather than second ticks with an invisible marker.
 
 Regenerate the store set with `python3 tools/make_store_assets.py store/screenshots store` after replacing screenshots. Screenshots must match each display's size exactly.
 
