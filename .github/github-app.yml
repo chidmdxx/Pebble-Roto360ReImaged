@@ -1,0 +1,6 @@
+instructions: |
+  Before building, reviewing, or changing this Pebble watchface, read and follow
+  .github/skills/pebble-development/SKILL.md. Use that project-owned skill for C
+  lifecycle and rendering, Health, seconds modes, offline PebbleKit JS settings,
+  resources, supported platforms, store assets, and SDK validation.
+  Keep detailed Pebble guidance in that skill rather than duplicating it here.

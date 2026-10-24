@@ -24,6 +24,7 @@ static uint32_t prv_read_le(const uint8_t *p, int bytes) {
 }
 
 bool numerals_load(void) {
+  numerals_unload();
   ResHandle handle = resource_get_handle(RESOURCE_ID_DIGITS);
   size_t size = resource_size(handle);
   size_t table_end = HEADER_SIZE + GLYPH_COUNT * TABLE_ENTRY_SIZE;
@@ -34,12 +35,16 @@ bool numerals_load(void) {
   if (!s_blob) {
     return false;
   }
-  resource_load(handle, s_blob, size);
-  if (memcmp(s_blob, "RD01", 4) != 0 || s_blob[4] != GLYPH_COUNT) {
+  if (resource_load(handle, s_blob, size) != size ||
+      memcmp(s_blob, "RD01", 4) != 0 || s_blob[4] != GLYPH_COUNT || s_blob[5] != 0) {
     numerals_unload();
     return false;
   }
   s_height = (int)prv_read_le(s_blob + 6, 2);
+  if (s_height == 0) {
+    numerals_unload();
+    return false;
+  }
   const uint8_t *data = s_blob + table_end;
   size_t data_size = size - table_end;
   for (int i = 0; i < GLYPH_COUNT; i++) {
@@ -47,7 +52,9 @@ bool numerals_load(void) {
     uint16_t width = (uint16_t)prv_read_le(entry, 2);
     uint16_t stride = (uint16_t)prv_read_le(entry + 2, 2);
     uint32_t offset = prv_read_le(entry + 4, 4);
-    if (stride * 8 < width || offset + (size_t)stride * s_height > data_size) {
+    size_t glyph_size = (size_t)stride * s_height;
+    if (width == 0 || stride != (width + 7) / 8 ||
+        offset > data_size || glyph_size > data_size - offset) {
       numerals_unload();
       return false;
     }
@@ -59,6 +66,7 @@ bool numerals_load(void) {
 void numerals_unload(void) {
   free(s_blob);
   s_blob = NULL;
+  s_height = 0;
 }
 
 // Blends two 2-bit-per-channel colours; `coverage` is out of 9 samples.
@@ -118,7 +126,7 @@ void numerals_draw(GBitmap *fb, const char *digits, GPoint center_q4, int32_t an
   }
 
   // Atlas pixels per screen pixel, in 16.16 fixed point.
-  int32_t scale = (int32_t)s_height * 65536 / digit_height;
+  int64_t scale = (int64_t)s_height * 65536 / digit_height;
   int32_t cos_a = cos_lookup(angle);
   int32_t sin_a = sin_lookup(angle);
   int half_w = width / 2;

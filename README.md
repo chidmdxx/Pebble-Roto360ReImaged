@@ -41,6 +41,8 @@ This follows Pebble's [battery guidance](https://developer.repebble.com/guides/b
 
 The small phone companion provides an embedded, offline settings page. It makes no network requests and needs no hosted page or third-party packages.
 
+If the dial's resources or layer cannot be loaded, the face logs the failure and shows **ROTO360 ERROR / RESTART WATCHFACE** instead of a dial with missing time digits. Restart the face; if the error persists, reinstall it. A window allocation failure is logged but cannot display an error screen.
+
 ## Build and install
 
 You need the [Pebble SDK](https://developer.repebble.com/sdk.md). The project CI uses Pebble CLI 5.0.40 with SDK 4.33.1. On Windows, use WSL.

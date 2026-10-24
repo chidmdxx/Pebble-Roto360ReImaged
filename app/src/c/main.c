@@ -52,6 +52,8 @@ static Window *s_window;
 static Layer *s_dial_layer;
 static GFont s_center_font;
 static bool s_numerals_ready;
+static bool s_init_failed;
+static bool s_services_started;
 static DialSecondsMode s_seconds_mode = DialSecondsAlways;
 static AppTimer *s_seconds_timer;
 static bool s_glance_active;
@@ -554,32 +556,76 @@ static void prv_inbox_dropped(AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "settings message dropped: %d", reason);
 }
 
+static void prv_error_update(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, "ROTO360 ERROR\nRESTART WATCHFACE",
+                     fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                     GRect(bounds.origin.x, bounds.origin.y + bounds.size.h / 2 - 20,
+                           bounds.size.w, 40),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+}
+
+static void prv_init_error(const char *reason) {
+  APP_LOG(APP_LOG_LEVEL_ERROR, "watchface initialization failed: %s", reason);
+  s_init_failed = true;
+  if (s_window) {
+    Layer *root = window_get_root_layer(s_window);
+    layer_set_update_proc(root, prv_error_update);
+    layer_mark_dirty(root);
+  }
+}
+
 static void prv_window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   s_dial_layer = layer_create(layer_get_bounds(root));
+  if (!s_dial_layer) {
+    prv_init_error("dial layer allocation");
+    return;
+  }
   layer_set_update_proc(s_dial_layer, prv_dial_update);
   layer_add_child(root, s_dial_layer);
 }
 
 static void prv_window_unload(Window *window) {
   (void)window;
-  layer_destroy(s_dial_layer);
+  if (s_dial_layer) {
+    layer_destroy(s_dial_layer);
+    s_dial_layer = NULL;
+  }
 }
 
-static void prv_init(void) {
+static bool prv_init(void) {
+  s_window = window_create();
+  if (!s_window) {
+    prv_init_error("window allocation");
+    return false;
+  }
   s_numerals_ready = numerals_load();
   if (!s_numerals_ready) {
-    APP_LOG(APP_LOG_LEVEL_ERROR, "digit atlas failed to load");
+    prv_init_error("digit atlas load");
+    window_stack_push(s_window, false);
+    return false;
   }
   s_center_font = fonts_load_custom_font(resource_get_handle(CENTER_FONT));
+  if (!s_center_font || s_center_font == fonts_get_system_font(FONT_KEY_FONT_FALLBACK)) {
+    s_center_font = NULL;
+    prv_init_error("center font load");
+    window_stack_push(s_window, false);
+    return false;
+  }
 
-  s_window = window_create();
   window_set_background_color(s_window, GColorBlack);
   window_set_window_handlers(s_window, (WindowHandlers){
     .load = prv_window_load,
     .unload = prv_window_unload,
   });
   window_stack_push(s_window, false);
+  if (s_init_failed) {
+    return false;
+  }
 
   if (persist_exists(SETTINGS_KEY_SECONDS)) {
     int size = persist_get_size(SETTINGS_KEY_SECONDS);
@@ -623,27 +669,43 @@ static void prv_init(void) {
   prv_update_seconds_mode();
   app_focus_service_subscribe(prv_focus);
   battery_state_service_subscribe(prv_battery);
+  s_services_started = true;
+  return true;
 }
 
 static void prv_deinit(void) {
-  tick_timer_service_unsubscribe();
-  prv_cancel_glance();
-  accel_tap_service_unsubscribe();
-  app_focus_service_unsubscribe();
+  if (s_services_started) {
+    tick_timer_service_unsubscribe();
+    prv_cancel_glance();
+    accel_tap_service_unsubscribe();
+    app_focus_service_unsubscribe();
 #if defined(PBL_HEALTH)
-  if (s_health_subscribed) {
-    health_service_events_unsubscribe();
-  }
+    if (s_health_subscribed) {
+      health_service_events_unsubscribe();
+      s_health_subscribed = false;
+    }
 #endif
-  battery_state_service_unsubscribe();
-  app_message_deregister_callbacks();
-  window_destroy(s_window);
-  fonts_unload_custom_font(s_center_font);
+    battery_state_service_unsubscribe();
+    app_message_deregister_callbacks();
+    s_services_started = false;
+  }
+  if (s_window) {
+    window_destroy(s_window);
+    s_window = NULL;
+  }
+  if (s_center_font) {
+    fonts_unload_custom_font(s_center_font);
+    s_center_font = NULL;
+  }
   numerals_unload();
+  s_numerals_ready = false;
 }
 
 int main(void) {
-  prv_init();
-  app_event_loop();
+  bool ready = prv_init();
+  if (s_window) {
+    app_event_loop();
+  }
   prv_deinit();
+  return ready ? 0 : 1;
 }
