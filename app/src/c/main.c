@@ -23,6 +23,7 @@
 #define CENTER_GAP 2
 #define SETTINGS_KEY_SECONDS 1
 #define SETTINGS_KEY_STEP_GOAL 2
+#define SETTINGS_KEY_DISABLE_STEPS 3
 #define SECONDS_GLANCE_MS 10000
 
 // Ring proportions, as fractions of the dial radius in 1/1000ths.
@@ -60,6 +61,7 @@ static bool s_glance_active;
 static bool s_in_focus = true;
 static bool s_second_ticks;
 static int32_t s_step_goal = DIAL_STEP_GOAL_DEFAULT;
+static bool s_disable_steps;
 static int32_t s_steps;
 static bool s_steps_available;
 static bool s_steps_initialized;
@@ -195,6 +197,9 @@ static GPoint prv_q4_to_px(GPoint p) {
 }
 
 static void prv_draw_step_progress(GContext *ctx, const Dial *dial) {
+  if (s_disable_steps) {
+    return;
+  }
   DialTrack track = dial_track_inset(dial->outer, 2);
   int32_t start = DEG_TO_TRIGANGLE(SHIELD_HALF_ANGLE);
   int32_t sweep = dial_step_progress(s_steps, s_step_goal);
@@ -398,6 +403,9 @@ static void prv_dial_update(Layer *layer, GContext *ctx) {
 }
 
 static bool prv_read_steps(void) {
+  if (s_disable_steps) {
+    return false;
+  }
   bool available = false;
   int32_t steps = 0;
 #if defined(PBL_HEALTH)
@@ -515,6 +523,30 @@ static void prv_health(HealthEventType event, void *context) {
 }
 #endif
 
+static void prv_update_step_counter(void) {
+#if defined(PBL_HEALTH)
+  if (s_disable_steps && s_health_subscribed) {
+    if (!health_service_events_unsubscribe()) {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "could not unsubscribe from Health updates");
+    } else {
+      s_health_subscribed = false;
+    }
+  } else if (!s_disable_steps && !s_health_subscribed) {
+    s_health_subscribed = health_service_events_subscribe(prv_health, NULL);
+    if (!s_health_subscribed) {
+      APP_LOG(APP_LOG_LEVEL_WARNING, "could not subscribe to Health updates");
+    }
+  }
+#endif
+  if (s_disable_steps) {
+    s_steps = 0;
+    s_steps_available = false;
+    s_steps_initialized = false;
+  } else {
+    prv_read_steps();
+  }
+}
+
 static bool prv_integer_tuple(const Tuple *tuple) {
   return (tuple->type == TUPLE_INT || tuple->type == TUPLE_UINT)
       && tuple->length == sizeof(int32_t);
@@ -524,12 +556,17 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   (void)context;
   Tuple *seconds = dict_find(iter, MESSAGE_KEY_ShowSeconds);
   Tuple *goal = dict_find(iter, MESSAGE_KEY_StepGoal);
+  Tuple *disable_steps = dict_find(iter, MESSAGE_KEY_DisableSteps);
   if (seconds && (!prv_integer_tuple(seconds) || seconds->value->uint32 > DialSecondsOnShake)) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "invalid ShowSeconds setting");
     return;
   }
   if (goal && (!prv_integer_tuple(goal) || !dial_step_goal_valid(goal->value->int32))) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "invalid StepGoal setting");
+    return;
+  }
+  if (disable_steps && (!prv_integer_tuple(disable_steps) || disable_steps->value->uint32 > 1)) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid DisableSteps setting");
     return;
   }
   if (seconds) {
@@ -546,7 +583,14 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       APP_LOG(APP_LOG_LEVEL_ERROR, "could not save StepGoal");
     }
   }
-  if (s_in_focus && (seconds || goal)) {
+  if (disable_steps) {
+    s_disable_steps = disable_steps->value->uint32 != 0;
+    if (persist_write_int(SETTINGS_KEY_DISABLE_STEPS, s_disable_steps) < 0) {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "could not save DisableSteps");
+    }
+    prv_update_step_counter();
+  }
+  if (s_in_focus && (seconds || goal || disable_steps)) {
     layer_mark_dirty(s_dial_layer);
   }
 }
@@ -652,19 +696,22 @@ static bool prv_init(void) {
       APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved step goal: %ld", (long)goal);
     }
   }
+  if (persist_exists(SETTINGS_KEY_DISABLE_STEPS)) {
+    int32_t disabled = persist_read_int(SETTINGS_KEY_DISABLE_STEPS);
+    if (persist_get_size(SETTINGS_KEY_DISABLE_STEPS) == (int)sizeof(int32_t)
+        && (disabled == 0 || disabled == 1)) {
+      s_disable_steps = disabled != 0;
+    } else {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved DisableSteps setting");
+    }
+  }
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
   AppMessageResult result = app_message_open(128, 64);
   if (result != APP_MSG_OK) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "could not open settings messaging: %d", result);
   }
-  prv_read_steps();
-#if defined(PBL_HEALTH)
-  s_health_subscribed = health_service_events_subscribe(prv_health, NULL);
-  if (!s_health_subscribed) {
-    APP_LOG(APP_LOG_LEVEL_WARNING, "could not subscribe to Health updates");
-  }
-#endif
+  prv_update_step_counter();
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick);
   prv_update_seconds_mode();
   app_focus_service_subscribe(prv_focus);

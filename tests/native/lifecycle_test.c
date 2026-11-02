@@ -44,6 +44,9 @@ static struct {
   AppMessageInboxDropped dropped;
   bool mode_saved;
   int32_t mode;
+  bool disable_steps_saved, fail_persist;
+  int32_t disable_steps;
+  int lines;
   int health_reads;
 #ifdef PBL_HEALTH
   HealthEventHandler health;
@@ -225,15 +228,29 @@ static void fire_timer(AppTimer *timer) {
   timer->live = false;
   timer->callback(timer->context);
 }
-bool persist_exists(int key) { return key == SETTINGS_KEY_SECONDS && f.mode_saved; }
+bool persist_exists(int key) {
+  return (key == SETTINGS_KEY_SECONDS && f.mode_saved)
+      || (key == SETTINGS_KEY_DISABLE_STEPS && f.disable_steps_saved);
+}
 int persist_get_size(int key) { (void)key; return sizeof(int32_t); }
 int persist_read_data(int key, void *buffer, size_t size) {
   (void)key; (void)buffer; (void)size; return -1;
 }
-int32_t persist_read_int(int key) { (void)key; return f.mode; }
-int persist_write_int(int key, int32_t value) { (void)key; (void)value; return sizeof(value); }
+int32_t persist_read_int(int key) {
+  return key == SETTINGS_KEY_DISABLE_STEPS ? f.disable_steps : f.mode;
+}
+int persist_write_int(int key, int32_t value) {
+  if (f.fail_persist) return -1;
+  if (key == SETTINGS_KEY_DISABLE_STEPS) {
+    f.disable_steps_saved = true;
+    f.disable_steps = value;
+  }
+  return sizeof(value);
+}
 Tuple *dict_find(const DictionaryIterator *iterator, uint32_t key) {
-  return key == MESSAGE_KEY_ShowSeconds ? iterator->seconds : iterator->goal;
+  if (key == MESSAGE_KEY_ShowSeconds) return iterator->seconds;
+  if (key == MESSAGE_KEY_StepGoal) return iterator->goal;
+  return key == MESSAGE_KEY_DisableSteps ? iterator->disable_steps : NULL;
 }
 AppMessageInboxReceived app_message_register_inbox_received(AppMessageInboxReceived handler) {
   AppMessageInboxReceived old = f.inbox; f.inbox = handler; return old;
@@ -279,6 +296,7 @@ void graphics_fill_radial(GContext *context, GRect rect, GOvalScaleMode mode,
 }
 void graphics_draw_line(GContext *context, GPoint start, GPoint end) {
   (void)context; (void)start; (void)end;
+  f.lines++;
 }
 void graphics_draw_text(GContext *context, const char *text, GFont font, GRect rect,
                         GTextOverflowMode overflow, GTextAlignment alignment,
@@ -397,6 +415,11 @@ int main(int argc, char **argv) {
         || strcmp(scenario, "cleanup") == 0) mode = DialSecondsOnShake;
     f.fail_message = strcmp(scenario, "message-failure") == 0;
     f.fail_health_subscription = strcmp(scenario, "health-subscription-failure") == 0;
+    if (strcmp(scenario, "disable-steps-saved") == 0
+        || strcmp(scenario, "disable-steps-invalid-saved") == 0) {
+      f.disable_steps_saved = true;
+      f.disable_steps = strcmp(scenario, "disable-steps-saved") == 0 ? 1 : 2;
+    }
     start(mode);
     if (strcmp(scenario, "always") == 0 || strcmp(scenario, "off") == 0) {
       int dirty = f.dirty;
@@ -493,6 +516,89 @@ int main(int argc, char **argv) {
       f.tick(&now, MINUTE_UNIT);
       check(s_steps_available && s_steps == 100, "minute polling survives Health subscription failure");
 #endif
+    } else if (strncmp(scenario, "disable-steps", 13) == 0) {
+      TupleValue value = { .int32 = 1 };
+      Tuple disabled = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &value };
+      DictionaryIterator iter = { .disable_steps = &disabled };
+      if (strcmp(scenario, "disable-steps-invalid-saved") == 0) {
+        check(!s_disable_steps && f.errors > 0, "invalid persisted bool logs and preserves enabled steps");
+      } else if (strcmp(scenario, "disable-steps-invalid") == 0) {
+        TupleValue seconds_value = { .int32 = DialSecondsOff };
+        Tuple seconds = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &seconds_value };
+        iter.seconds = &seconds;
+        for (int i = 0; i < 4; i++) {
+          disabled.type = i == 2 ? TUPLE_CSTRING : TUPLE_INT;
+          disabled.length = i == 3 ? 1 : sizeof(int32_t);
+          value.int32 = i == 0 ? -1 : i == 1 ? 2 : 1;
+          int errors = f.errors;
+          f.inbox(&iter, NULL);
+          check(f.errors == errors + 1 && !s_disable_steps && !f.disable_steps_saved,
+                "invalid bool is logged without applying or persisting it");
+          check(s_seconds_mode == DialSecondsAlways, "invalid bool rejects the whole settings message");
+        }
+      } else {
+        if (strcmp(scenario, "disable-steps-saved") == 0) {
+          check(s_disable_steps && !f.health_live && f.health_reads == 0,
+                "saved disabled counter never starts Health or reads steps");
+        } else {
+          int errors = f.errors;
+          f.fail_persist = strcmp(scenario, "disable-steps-save-failure") == 0;
+          f.inbox(&iter, NULL);
+          check(s_disable_steps, "settings disable the step counter immediately");
+          if (f.fail_persist) {
+            check(f.errors > errors && !f.disable_steps_saved, "failed persistence is reported");
+          } else {
+            check(f.disable_steps_saved && f.disable_steps == 1, "disabled bool is persisted");
+          }
+          f.fail_persist = false;
+        }
+        check(!f.health_live && !s_steps_available && s_steps == 0,
+              "disabled counter unsubscribes and clears stale step data");
+        int reads = f.health_reads;
+        int dirty = f.dirty;
+        check(!prv_read_steps(), "disabled step reads are inert");
+        struct tm now = { 0 };
+        f.tick(&now, MINUTE_UNIT);
+        f.focus(false);
+        f.focus(true);
+#ifdef PBL_HEALTH
+        prv_health(HealthEventMovementUpdate, NULL);
+#endif
+        check(f.health_reads == reads, "disabled ticks, focus and late Health events never read Health");
+        check(f.tick_units == SECOND_UNIT && f.dirty > dirty,
+              "disabling steps preserves seconds and time redraws");
+        GContext context = { 0 };
+        Dial dial = { .outer = { .half_w = 60, .half_h = 60, .corner = 60 }, .unit = 60 };
+        int lines = f.lines;
+        prv_draw_step_progress(&context, &dial);
+        check(f.lines == lines, "disabled counter draws neither progress nor unavailable dash");
+#ifdef PBL_HEALTH
+        f.health_available = true;
+        f.steps = 4321;
+#endif
+        f.fail_health_subscription = strcmp(scenario, "disable-steps-subscription-failure") == 0;
+        value.int32 = 0;
+        f.inbox(&iter, NULL);
+        check(!s_disable_steps && f.disable_steps_saved && f.disable_steps == 0,
+              "enabling the counter persists the bool");
+#ifdef PBL_HEALTH
+        check(s_steps_available && s_steps == 4321 && f.health_reads == reads + 1,
+              "enabling immediately refreshes today's total");
+        check(f.health_live == !f.fail_health_subscription,
+              "enabling subscribes to Health when available");
+        if (f.fail_health_subscription) {
+          check(f.warnings > 0, "failed re-subscription is logged");
+          f.steps = 5000;
+          f.tick(&now, MINUTE_UNIT);
+          check(s_steps == 5000, "minute polling survives re-subscription failure");
+        }
+#else
+        check(!s_steps_available && f.health_reads == 0, "toggle is safe without Health support");
+#endif
+        lines = f.lines;
+        prv_draw_step_progress(&context, &dial);
+        check(f.lines > lines, "enabling restores step progress or unavailable dash");
+      }
     } else {
       check(false, "unknown scenario");
     }
