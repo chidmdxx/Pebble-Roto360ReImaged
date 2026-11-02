@@ -13,8 +13,9 @@ function validateSettings(settings) {
   if (!settings || typeof settings.ShowSeconds !== 'number' ||
       settings.ShowSeconds % 1 !== 0 || settings.ShowSeconds < 0 || settings.ShowSeconds > 2 ||
       typeof settings.StepGoal !== 'number' || settings.StepGoal % 1 !== 0 ||
-      settings.StepGoal < 1 || settings.StepGoal > maxGoal) {
-    throw new Error('Invalid seconds mode or daily step goal');
+      settings.StepGoal < 1 || settings.StepGoal > maxGoal ||
+      typeof settings.DisableSteps !== 'boolean') {
+    throw new Error('Invalid seconds mode, daily step goal or step counter setting');
   }
   return settings;
 }
@@ -22,17 +23,26 @@ function validateSettings(settings) {
 function readSettings() {
   var saved = localStorage.getItem(storageKey);
   if (saved !== null) {
-    return validateSettings(JSON.parse(saved));
+    var settings = JSON.parse(saved);
+    // Older saved settings predate the optional step counter switch.
+    if (settings && settings.DisableSteps === undefined) {
+      settings.DisableSteps = false;
+    }
+    return validateSettings(settings);
   }
   var legacy = localStorage.getItem('showSeconds');
   if (legacy !== null && legacy !== '0' && legacy !== '1') {
     throw new Error('Invalid saved seconds setting');
   }
-  return { ShowSeconds: legacy === '0' ? 0 : 1, StepGoal: defaultGoal };
+  return { ShowSeconds: legacy === '0' ? 0 : 1, StepGoal: defaultGoal, DisableSteps: false };
 }
 
 function sendSettings(settings) {
-  Pebble.sendAppMessage(settings, function() {}, function(error) {
+  Pebble.sendAppMessage({
+    ShowSeconds: settings.ShowSeconds,
+    StepGoal: settings.StepGoal,
+    DisableSteps: settings.DisableSteps ? 1 : 0
+  }, function() {}, function(error) {
     reportError('Could not update the watch. Reconnect and save settings again.', error);
   });
 }
@@ -71,13 +81,19 @@ Pebble.addEventListener('showConfiguration', function() {
       '<p>The green outer arc fills toward your goal, then stays full until the next day. ' +
       'Enable Pebble Health for steps. An amber dash means step data is unavailable. ' +
       'Steps stay on the watch; this goal does not change Pebble Health settings.</p>' +
+      '<label><input id="disableSteps" type="checkbox"' +
+      (settings.DisableSteps ? ' checked' : '') + '>Disable step counter (conserve battery)</label>' +
+      '<p>Hides the step arc and unavailable-data dash, and stops this face from reading ' +
+      'steps or listening for Health updates. Pebble Health still tracks activity. ' +
+      'This does not change the seconds marker setting.</p>' +
       '<button type="submit">Save</button></form><script>' +
       'document.getElementById("settings").onsubmit=function(event){event.preventDefault();' +
       'var goal=Number(document.getElementById("goal").value);' +
       'if(!isFinite(goal)||goal%1!==0||goal<1||goal>' + maxGoal +
       '){alert("Enter a whole-number step goal from 1 to ' + maxGoal + '.");return;}' +
       'window.location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({' +
-      'ShowSeconds:Number(document.getElementById("seconds").value),StepGoal:goal}));};' +
+      'ShowSeconds:Number(document.getElementById("seconds").value),StepGoal:goal,' +
+      'DisableSteps:document.getElementById("disableSteps").checked}));};' +
       '</script></body></html>';
     Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   } catch (error) {
@@ -97,7 +113,8 @@ Pebble.addEventListener('webviewclosed', function(event) {
     }
     var settings = JSON.parse(response);
     validateSettings(settings);
-    var values = { ShowSeconds: settings.ShowSeconds, StepGoal: settings.StepGoal };
+    var values = { ShowSeconds: settings.ShowSeconds, StepGoal: settings.StepGoal,
+      DisableSteps: settings.DisableSteps };
     localStorage.setItem(storageKey, JSON.stringify(values));
     sendSettings(values);
   } catch (error) {

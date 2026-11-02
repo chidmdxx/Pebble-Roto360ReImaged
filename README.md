@@ -30,12 +30,13 @@ Open the watchface's settings in the Pebble phone app to configure:
 
 - **Daily step goal:** a whole number from 1 to 100,000; defaults to 8,000. This changes only the watchface's target, not Pebble Health's goal.
 - **Seconds marker:** **Off**, **Always**, or **10 seconds after wrist shake / tap**. Existing on/off preferences are preserved; new installs default to Always. Shake mode shows seconds for 10 seconds after a detected gesture, then hides the marker and returns to minute ticks. Another gesture restarts that interval. Motion detection depends on the watch and is not guaranteed to match a wrist raise.
+- **Disable step counter (conserve battery):** off by default, preserving step progress on existing installs. Enable it to hide both the step arc and unavailable-data dash and stop this face's Health reads and event subscription. Re-enable the counter to immediately refresh today's steps. The saved goal and seconds mode are unchanged; Pebble Health continues tracking activity independently.
 
 Enable Pebble Health in the Pebble phone app to supply steps. The face reads today's on-watch total, listens for Health updates, and checks again each minute, including after midnight. An amber dash at the bottom of the bezel means step data is unavailable; it is not shown as zero progress. No step or sleep data is sent to the phone or a server. The settings are saved on both the phone and watch and reapplied when they reconnect.
 
 ### Battery use
 
-Off and idle shake mode subscribe to minute ticks, not hidden second ticks. Always and an active shake interval update each second. Seconds also pause when a notification covers the face; shake intervals are cancelled on focus loss. Step progress uses the existing Health service rather than a separate accelerometer step counter. Battery changes and changed step totals also trigger updates.
+Off and idle shake mode subscribe to minute ticks, not hidden second ticks. Always and an active shake interval update each second. Seconds also pause when a notification covers the face; shake intervals are cancelled on focus loss. Step progress uses the existing Health service rather than a separate accelerometer step counter. Battery changes and changed step totals also trigger updates. To avoid step-related reads and updates as well, enable **Disable step counter**; this is independent of seconds mode, not an automatic low-battery threshold.
 
 This follows Pebble's [battery guidance](https://developer.repebble.com/guides/best-practices/conserving-battery-life/): reduce wakeups, offer a seconds-off option, and limit animation to gestures. **Off** gives the fewest animation wakeups; shake mode is a compromise. The [Health guide](https://developer.repebble.com/guides/events-and-services/health/#detecting-activities) also suggests suppressing animation during detected sleep, but this face does not change seconds behavior based on sleep. Emulator checks do not measure real-watch battery life.
 

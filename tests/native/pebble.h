@@ -27,6 +27,7 @@
 #define RESOURCE_ID_DIGITS 100
 #define MESSAGE_KEY_ShowSeconds 0
 #define MESSAGE_KEY_StepGoal 1
+#define MESSAGE_KEY_DisableSteps 2
 #define FONT_KEY_FONT_FALLBACK "RESOURCE_ID_GOTHIC_14"
 #define FONT_KEY_GOTHIC_14 "RESOURCE_ID_GOTHIC_14"
 #define FONT_KEY_GOTHIC_14_BOLD "RESOURCE_ID_GOTHIC_14_BOLD"
@@ -81,7 +82,7 @@ typedef enum { APP_MSG_OK = 0, APP_MSG_OUT_OF_MEMORY = 1 << 10 } AppMessageResul
 typedef enum { TUPLE_BYTE_ARRAY, TUPLE_CSTRING, TUPLE_UINT, TUPLE_INT } TupleType;
 typedef union { int32_t int32; uint32_t uint32; } TupleValue;
 typedef struct { uint32_t key; TupleType type; uint16_t length; TupleValue *value; } Tuple;
-typedef struct DictionaryIterator { Tuple *seconds, *goal; } DictionaryIterator;
+typedef struct DictionaryIterator { Tuple *seconds, *goal, *disable_steps; } DictionaryIterator;
 typedef void (*AppMessageInboxReceived)(DictionaryIterator *, void *);
 typedef void (*AppMessageInboxDropped)(AppMessageResult, void *);
 typedef enum { APP_LOG_LEVEL_ERROR = 1, APP_LOG_LEVEL_WARNING = 50,
