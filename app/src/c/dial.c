@@ -50,26 +50,6 @@ int32_t dial_minute_angle(int label_minute, int minute) {
   return (int32_t)prv_mod(label_minute - minute, 60) * DIAL_FULL_TURN / 60;
 }
 
-bool dial_minute_label_visible(int label_minute, int minute) {
-  int diff = prv_mod(label_minute - minute, 60);
-  return diff > 2 && diff < 58;
-}
-
-int32_t dial_minute_offset(int label_minute, int minute) {
-  int32_t angle = dial_minute_angle(label_minute, minute);
-  return angle > DIAL_FULL_TURN / 2 ? angle - DIAL_FULL_TURN : angle;
-}
-
-int32_t dial_clear_pointer(int32_t offset, int32_t clearance) {
-  if (offset > 0 && offset < clearance) {
-    return clearance;
-  }
-  if (offset < 0 && offset > -clearance) {
-    return -clearance;
-  }
-  return offset;
-}
-
 int32_t dial_hour_angle(int slot) {
   return (int32_t)prv_mod(slot, DIAL_HOUR_SLOTS) * DIAL_FULL_TURN / DIAL_HOUR_SLOTS;
 }

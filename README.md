@@ -8,7 +8,7 @@ This is an independent remake inspired by [Roto360](https://apps.repebble.com/ro
 
 ## How it reads
 
-The time sits under the blue shield at the top of the dial. The outer ring holds the hours and the inner ring holds the minutes in steps of five, and both rings turn so the current hour and minute stay under the shield. The minute box shows the exact minute. The center shows the weekday, battery level and date.
+The time sits under the blue shield fixed at the top of the dial. The outer ring holds the hours and the inner ring holds the minutes in steps of five, and the rings turn so the current hour and minute stay under the shield. The minute box shows the exact minute and sits in front of the minute ring: nearby labels keep their regular spacing and pass underneath it, becoming partially obscured as they approach each five-minute mark. The center shows the weekday, battery level and date.
 
 - Follows the watch's 12-hour or 24-hour setting. In 12-hour mode the hour ring reads 01 to 12.
 - Battery turns red at 20% or below. While charging it shows a green `+`, for example `+80%`.
