@@ -47,27 +47,21 @@ static void test_minute_ring(void) {
   CHECK(dial_minute_angle(20, 20) == 0);
   CHECK(dial_minute_angle(35, 20) == DIAL_FULL_TURN / 4);
   CHECK(dial_minute_angle(5, 20) == DIAL_FULL_TURN * 3 / 4);
+  CHECK(dial_minute_angle(0, 60) == 0);
+  CHECK(dial_minute_angle(0, -1) == dial_minute_angle(0, 59));
   CHECK(dial_hour_angle(3) == DIAL_FULL_TURN / 4);
   CHECK(dial_hour_angle(12) == 0);
 
-  // Labels within two minutes of the pointer would sit half under its box.
-  CHECK(!dial_minute_label_visible(20, 20));
-  CHECK(!dial_minute_label_visible(25, 23));
-  CHECK(dial_minute_label_visible(25, 22));
-  CHECK(!dial_minute_label_visible(0, 59));
-  CHECK(!dial_minute_label_visible(55, 57));
-  CHECK(dial_minute_label_visible(55, 58));
-  CHECK(dial_minute_label_visible(50, 57));
-  CHECK(dial_minute_offset(5, 3) == DIAL_FULL_TURN * 2 / 60);
-  CHECK(dial_minute_offset(0, 3) == dial_minute_angle(0, 3) - DIAL_FULL_TURN);
-  CHECK(dial_minute_offset(0, 3) < 0);
-  CHECK(dial_minute_offset(33, 3) == DIAL_FULL_TURN / 2);
-  CHECK(dial_minute_offset(35, 3) < 0);
-  CHECK(dial_clear_pointer(100, 3000) == 3000);
-  CHECK(dial_clear_pointer(-100, 3000) == -3000);
-  CHECK(dial_clear_pointer(5000, 3000) == 5000);
-  CHECK(dial_clear_pointer(-5000, 3000) == -5000);
-  CHECK(dial_clear_pointer(0, 3000) == 0);
+  for (int minute = 0; minute < 60; minute++) {
+    for (int slot = 0; slot < DIAL_MINUTE_SLOTS; slot++) {
+      int label = dial_minute_label(slot);
+      int relative_minute = (label - minute + 60) % 60;
+      CHECK(dial_minute_angle(label, minute) == relative_minute * DIAL_FULL_TURN / 60);
+      if (minute == label) {
+        CHECK(dial_minute_angle(label, minute) == 0);
+      }
+    }
+  }
 }
 
 static void test_text(void) {

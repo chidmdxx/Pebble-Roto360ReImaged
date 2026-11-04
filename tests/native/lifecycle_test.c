@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static struct tm *fake_localtime(const time_t *timer);
+#define localtime fake_localtime
 #define main watchface_main
 #ifdef LIFECYCLE_BASELINE
 // The original main relied on C's implicit return, which renaming removes.
@@ -17,6 +19,7 @@
 #include "../../app/src/c/main.c"
 #endif
 #undef main
+#undef localtime
 
 struct Layer { GRect bounds; LayerUpdateProc update; bool live; bool root; };
 struct Window { Layer root; WindowHandlers handlers; bool live; bool pushed; };
@@ -48,6 +51,15 @@ static struct {
   int32_t disable_steps;
   int lines;
   int health_reads;
+  bool capture, use_fake_time;
+  struct tm now;
+  int sectors, label_count;
+  struct {
+    char text[4];
+    GPoint center;
+    int32_t angle;
+    int sectors;
+  } labels[25];
 #ifdef PBL_HEALTH
   HealthEventHandler health;
   void *health_context;
@@ -55,6 +67,10 @@ static struct {
   HealthValue steps;
 #endif
 } f;
+
+static struct tm *fake_localtime(const time_t *timer) {
+  return f.use_fake_time ? &f.now : localtime(timer);
+}
 
 static void check(bool condition, const char *message) {
   if (!condition) {
@@ -85,7 +101,7 @@ Window *window_create(void) {
   f.window_creates++;
   if (f.fail_window) return NULL;
   f.window.live = true;
-  f.window.root = (Layer){ .bounds = GRect(0, 0, PBL_DISPLAY_WIDTH, PBL_DISPLAY_WIDTH),
+  f.window.root = (Layer){ .bounds = GRect(0, 0, PBL_DISPLAY_WIDTH, PBL_DISPLAY_HEIGHT),
                            .live = true, .root = true };
   return &f.window;
 }
@@ -187,7 +203,13 @@ int numerals_width(const char *text, int height) {
 }
 void numerals_draw(GBitmap *bitmap, const char *text, GPoint center, int32_t angle,
                    int height, GColor color) {
-  (void)bitmap; (void)text; (void)center; (void)angle; (void)height; (void)color;
+  (void)bitmap; (void)height; (void)color;
+  check(f.label_count < 25, "label recording capacity");
+  int index = f.label_count++;
+  snprintf(f.labels[index].text, sizeof(f.labels[index].text), "%s", text);
+  f.labels[index].center = center;
+  f.labels[index].angle = angle;
+  f.labels[index].sectors = f.sectors;
 }
 void tick_timer_service_subscribe(TimeUnits units, TickHandler handler) {
   check(!f.tick_live, "unsubscribe before replacing tick subscription");
@@ -293,6 +315,7 @@ void graphics_fill_circle(GContext *context, GPoint point, uint16_t radius) {
 void graphics_fill_radial(GContext *context, GRect rect, GOvalScaleMode mode,
                           uint16_t inset, int32_t start, int32_t end) {
   (void)context; (void)rect; (void)mode; (void)inset; (void)start; (void)end;
+  f.sectors++;
 }
 void graphics_draw_line(GContext *context, GPoint start, GPoint end) {
   (void)context; (void)start; (void)end;
@@ -314,9 +337,13 @@ void graphics_draw_text(GContext *context, const char *text, GFont font, GRect r
   }
 }
 GPath *gpath_create(const GPathInfo *info) { static GPath path; (void)info; return &path; }
-void gpath_draw_filled(GContext *context, GPath *path) { (void)context; (void)path; }
+void gpath_draw_filled(GContext *context, GPath *path) {
+  (void)context; (void)path; f.sectors++;
+}
 void gpath_destroy(GPath *path) { (void)path; }
-GBitmap *graphics_capture_frame_buffer(GContext *context) { (void)context; return NULL; }
+GBitmap *graphics_capture_frame_buffer(GContext *context) {
+  return f.capture ? (GBitmap *)context : NULL;
+}
 void graphics_release_frame_buffer(GContext *context, GBitmap *bitmap) {
   (void)context; valid(bitmap);
 }
@@ -399,6 +426,58 @@ int main(int argc, char **argv) {
     check(f.null_calls == 0, "cleanup before initialization is harmless");
     check(f.window_destroys == 0 && f.layer_destroys == 0 && f.font_unloads == 0,
           "empty cleanup does not free unowned resources");
+  } else if (strcmp(scenario, "minute-layout") == 0) {
+    start(DialSecondsOff);
+    f.capture = true;
+    f.use_fake_time = true;
+    f.now = (struct tm){ .tm_hour = 23, .tm_wday = 3, .tm_mon = 10, .tm_mday = 8 };
+    int half_w = f.layer.bounds.size.w / 2;
+    int half_h = f.layer.bounds.size.h / 2;
+    int unit = half_w < half_h ? half_w : half_h;
+    Dial dial = {
+      .center = grect_center_point(&f.layer.bounds),
+      .center_q4 = GPoint(f.layer.bounds.size.w * 8, f.layer.bounds.size.h * 8),
+      .outer = PBL_IF_ROUND_ELSE(((DialTrack){ unit, unit, unit }),
+          ((DialTrack){ half_w, half_h, prv_scale(unit, SQUARE_CORNER) })),
+      .unit = unit,
+    };
+    DialTrack minute_text = prv_track(&dial, MINUTE_TEXT_RADIUS);
+    int32_t normal = 0;
+    GPoint pointer = prv_track_walk_q4(&dial, minute_text, 0, &normal);
+    for (int minute = 0; minute <= 60; minute++) {
+      f.now.tm_min = minute % 60;
+      f.label_count = 0;
+      f.sectors = 0;
+      GContext context = { 0 };
+      prv_dial_update(&f.layer, &context);
+      check(f.label_count == 25, "draw all ring labels plus hour and minute readouts");
+      for (int slot = 0; slot < DIAL_MINUTE_SLOTS; slot++) {
+        char expected[4];
+        snprintf(expected, sizeof(expected), "%02d", slot * 5);
+        check(strcmp(f.labels[slot].text, expected) == 0, "ring label value");
+        check(f.labels[slot].sectors == 0, "draw ring labels beneath pointer sectors");
+        int32_t expected_normal = 0;
+        GPoint expected_center = prv_track_walk_q4(&dial, minute_text,
+            dial_minute_angle(slot * 5, minute % 60), &expected_normal);
+        check(f.labels[slot].center.x == expected_center.x
+              && f.labels[slot].center.y == expected_center.y
+              && f.labels[slot].angle == expected_normal,
+              "ring labels must rotate uniformly without pointer avoidance or hiding");
+      }
+      check(f.labels[24].sectors == 3, "draw exact minute above all pointer sectors");
+      check(f.labels[24].center.x == pointer.x && f.labels[24].center.y == pointer.y
+            && f.labels[24].angle == normal, "minute window must remain fixed at the top");
+      char expected[4];
+      snprintf(expected, sizeof(expected), "%02d", minute % 60);
+      check(strcmp(f.labels[24].text, expected) == 0, "exact minute readout value");
+      if (minute % 5 == 0) {
+        int slot = minute % 60 / 5;
+        check(f.labels[slot].center.x == pointer.x && f.labels[slot].center.y == pointer.y,
+              "ring label passes directly beneath the fixed minute window");
+      }
+    }
+    prv_deinit();
+    assert_clean();
   } else if (strcmp(scenario, "main") == 0) {
     watchface_main();
     check(f.event_loops == 1 && f.service_starts > 0,

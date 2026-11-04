@@ -9,7 +9,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const scenarios = [
   'window-failure', 'layer-failure', 'font-null', 'font-fallback', 'atlas-failure',
-  'main', 'always', 'off', 'shake', 'timer-failure', 'focus', 'cleanup',
+  'main', 'minute-layout', 'always', 'off', 'shake', 'timer-failure', 'focus', 'cleanup',
   'health', 'health-subscription-failure', 'message-failure', 'partial-cleanup',
   'disable-steps', 'disable-steps-saved', 'disable-steps-invalid-saved', 'disable-steps-invalid',
   'disable-steps-save-failure', 'disable-steps-subscription-failure'
@@ -26,7 +26,9 @@ test('native watchface lifecycle and fault injection', async t => {
   try {
     for (const [platform, defines] of [
       ['round-health', ['-DPBL_DISPLAY_WIDTH=260', '-DPBL_ROUND', '-DPBL_HEALTH']],
-      ['rect-no-health', ['-DPBL_DISPLAY_WIDTH=144']]
+      ['small-round', ['-DPBL_DISPLAY_WIDTH=180', '-DPBL_ROUND']],
+      ['large-rect', ['-DPBL_DISPLAY_WIDTH=200', '-DPBL_DISPLAY_HEIGHT=228', '-DPBL_HEALTH']],
+      ['rect-no-health', ['-DPBL_DISPLAY_WIDTH=144', '-DPBL_DISPLAY_HEIGHT=168']]
     ]) {
       const binary = path.relative(root, path.join(dir, platform))
         .split(path.sep).join('/');

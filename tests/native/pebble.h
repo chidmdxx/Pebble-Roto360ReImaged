@@ -12,6 +12,9 @@
 #ifndef PBL_DISPLAY_WIDTH
 #define PBL_DISPLAY_WIDTH 260
 #endif
+#ifndef PBL_DISPLAY_HEIGHT
+#define PBL_DISPLAY_HEIGHT PBL_DISPLAY_WIDTH
+#endif
 #ifdef PBL_ROUND
 #define PBL_IF_ROUND_ELSE(round, rect) (round)
 #else
