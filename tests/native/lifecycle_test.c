@@ -24,6 +24,7 @@ static struct tm *fake_localtime(const time_t *timer);
 struct Layer { GRect bounds; LayerUpdateProc update; bool live; bool root; };
 struct Window { Layer root; WindowHandlers handlers; bool live; bool pushed; };
 struct AppTimer { AppTimerCallback callback; void *context; bool live; };
+struct GBitmap { uint8_t data[80]; GColor *palette; };
 
 static struct {
   bool fail_window, fail_layer, fail_font_null, fail_font_fallback, fail_atlas, fail_timer;
@@ -49,11 +50,23 @@ static struct {
   int32_t mode;
   bool disable_steps_saved, fail_persist;
   int32_t disable_steps;
+  bool center_saved;
+  int32_t center;
+  int weather_requests;
   int lines;
   int health_reads;
   bool capture, use_fake_time;
   struct tm now;
   int sectors, label_count;
+  bool capture_center_lines, capture_music, antialiased;
+  uint8_t stroke_width;
+  int center_line_count, date_top;
+  GRect music_rect;
+  struct {
+    GPoint start, end;
+    uint8_t stroke_width;
+    bool antialiased;
+  } center_lines[5];
   struct {
     char text[4];
     GPoint center;
@@ -252,27 +265,48 @@ static void fire_timer(AppTimer *timer) {
 }
 bool persist_exists(int key) {
   return (key == SETTINGS_KEY_SECONDS && f.mode_saved)
-      || (key == SETTINGS_KEY_DISABLE_STEPS && f.disable_steps_saved);
+      || (key == SETTINGS_KEY_DISABLE_STEPS && f.disable_steps_saved)
+      || (key == SETTINGS_KEY_CENTER_DISPLAY && f.center_saved);
 }
 int persist_get_size(int key) { (void)key; return sizeof(int32_t); }
 int persist_read_data(int key, void *buffer, size_t size) {
   (void)key; (void)buffer; (void)size; return -1;
 }
 int32_t persist_read_int(int key) {
-  return key == SETTINGS_KEY_DISABLE_STEPS ? f.disable_steps : f.mode;
+  return key == SETTINGS_KEY_CENTER_DISPLAY ? f.center
+       : key == SETTINGS_KEY_DISABLE_STEPS ? f.disable_steps : f.mode;
 }
 int persist_write_int(int key, int32_t value) {
   if (f.fail_persist) return -1;
   if (key == SETTINGS_KEY_DISABLE_STEPS) {
     f.disable_steps_saved = true;
     f.disable_steps = value;
+  } else if (key == SETTINGS_KEY_CENTER_ORDER) {
+    f.center_saved = true;
+    f.center = value;
   }
   return sizeof(value);
 }
 Tuple *dict_find(const DictionaryIterator *iterator, uint32_t key) {
   if (key == MESSAGE_KEY_ShowSeconds) return iterator->seconds;
   if (key == MESSAGE_KEY_StepGoal) return iterator->goal;
-  return key == MESSAGE_KEY_DisableSteps ? iterator->disable_steps : NULL;
+  if (key == MESSAGE_KEY_DisableSteps) return iterator->disable_steps;
+  if (key == MESSAGE_KEY_CenterDisplay) return iterator->center;
+  if (key == MESSAGE_KEY_CenterOrder) return iterator->order;
+  if (key == MESSAGE_KEY_MusicTitle) return iterator->music;
+  if (key == MESSAGE_KEY_NotificationCount) return iterator->notifications;
+  if (key == MESSAGE_KEY_MusicExpires) return iterator->music_expires;
+  if (key == MESSAGE_KEY_NotificationsExpire) return iterator->notifications_expire;
+  if (key == MESSAGE_KEY_SlotReset) return iterator->slot_reset;
+  if (key == MESSAGE_KEY_SlotIndex) return iterator->slot_index;
+  if (key == MESSAGE_KEY_SlotKind) return iterator->slot_kind;
+  if (key == MESSAGE_KEY_SlotText) return iterator->slot_text;
+  if (key == MESSAGE_KEY_SlotExpires) return iterator->slot_expires;
+  if (key == MESSAGE_KEY_WeatherUnit) return iterator->weather_unit;
+  if (key == MESSAGE_KEY_WeatherTemperature) return iterator->temperature;
+  if (key == MESSAGE_KEY_WeatherPixels) return iterator->pixels;
+  if (key == MESSAGE_KEY_WeatherPalette) return iterator->palette;
+  return key == MESSAGE_KEY_WeatherExpires ? iterator->expires : NULL;
 }
 AppMessageInboxReceived app_message_register_inbox_received(AppMessageInboxReceived handler) {
   AppMessageInboxReceived old = f.inbox; f.inbox = handler; return old;
@@ -280,6 +314,18 @@ AppMessageInboxReceived app_message_register_inbox_received(AppMessageInboxRecei
 AppMessageInboxDropped app_message_register_inbox_dropped(AppMessageInboxDropped handler) {
   AppMessageInboxDropped old = f.dropped; f.dropped = handler; return old;
 }
+AppMessageOutboxFailed app_message_register_outbox_failed(AppMessageOutboxFailed handler) {
+  (void)handler; return NULL;
+}
+AppMessageResult app_message_outbox_begin(DictionaryIterator **iterator) {
+  static DictionaryIterator outbox;
+  *iterator = &outbox;
+  return APP_MSG_OK;
+}
+DictionaryResult dict_write_uint8(DictionaryIterator *iterator, uint32_t key, uint8_t value) {
+  (void)iterator; (void)key; (void)value; return DICT_OK;
+}
+AppMessageResult app_message_outbox_send(void) { f.weather_requests++; return APP_MSG_OK; }
 AppMessageResult app_message_open(uint32_t inbox, uint32_t outbox) {
   check(inbox >= 32 && outbox > 0, "settings buffers must be allocated");
   f.service_starts++;
@@ -304,8 +350,19 @@ int32_t cos_lookup(int32_t angle) { return sin_lookup(angle + TRIG_MAX_ANGLE / 4
 void graphics_context_set_fill_color(GContext *context, GColor color) { (void)context; (void)color; }
 void graphics_context_set_stroke_color(GContext *context, GColor color) { (void)context; (void)color; }
 void graphics_context_set_text_color(GContext *context, GColor color) { (void)context; (void)color; }
-void graphics_context_set_stroke_width(GContext *context, uint8_t width) { (void)context; (void)width; }
-void graphics_context_set_antialiased(GContext *context, bool enabled) { (void)context; (void)enabled; }
+void graphics_context_set_stroke_width(GContext *context, uint8_t width) { (void)context; f.stroke_width = width; }
+void graphics_context_set_antialiased(GContext *context, bool enabled) { (void)context; f.antialiased = enabled; }
+void graphics_context_set_compositing_mode(GContext *context, GCompOp op) {
+  (void)context; (void)op;
+}
+void graphics_draw_bitmap_in_rect(GContext *context, const GBitmap *bitmap, GRect rect) {
+  (void)context; (void)rect; valid(bitmap);
+}
+GSize graphics_text_layout_get_content_size(const char *text, GFont font, GRect rect,
+                                            GTextOverflowMode overflow, GTextAlignment alignment) {
+  (void)font; (void)rect; (void)overflow; (void)alignment;
+  return GSize((int16_t)(strlen(text) * 5), 10);
+}
 void graphics_fill_rect(GContext *context, GRect rect, uint16_t radius, GCornerMask corners) {
   (void)context; (void)rect; (void)radius; (void)corners;
 }
@@ -318,7 +375,15 @@ void graphics_fill_radial(GContext *context, GRect rect, GOvalScaleMode mode,
   f.sectors++;
 }
 void graphics_draw_line(GContext *context, GPoint start, GPoint end) {
-  (void)context; (void)start; (void)end;
+  (void)context;
+  if (f.capture_center_lines) {
+    check(f.center_line_count < 5, "notification bell has no extra lines");
+    int i = f.center_line_count++;
+    f.center_lines[i].start = start;
+    f.center_lines[i].end = end;
+    f.center_lines[i].stroke_width = f.stroke_width;
+    f.center_lines[i].antialiased = f.antialiased;
+  }
   f.lines++;
 }
 void graphics_draw_text(GContext *context, const char *text, GFont font, GRect rect,
@@ -327,6 +392,14 @@ void graphics_draw_text(GContext *context, const char *text, GFont font, GRect r
   (void)context; (void)overflow; (void)alignment; (void)attributes;
   valid(font);
   check(rect.size.w > 0 && rect.size.h > 0, "draw text into a visible rectangle");
+  if ((f.capture_center_lines || f.capture_music) && strcmp(text, "NOV 08") == 0) {
+    f.date_top = rect.origin.y + CENTER_FONT_SIZE - CENTER_CAP_HEIGHT;
+  }
+  if (f.capture_music && strcmp(text, "Agyp") == 0) {
+    f.music_rect = rect;
+    check(font == &f.system_font && overflow == GTextOverflowModeTrailingEllipsis,
+          "music keeps the system font and ellipsis");
+  }
   if (strstr(text, "ROTO360 ERROR")) {
     check(font == &f.system_font, "fallback title uses a system font");
     f.fallback_title++;
@@ -348,6 +421,17 @@ void graphics_release_frame_buffer(GContext *context, GBitmap *bitmap) {
   (void)context; valid(bitmap);
 }
 GBitmapFormat gbitmap_get_format(const GBitmap *bitmap) { valid(bitmap); return GBitmapFormat8Bit; }
+GBitmap *gbitmap_create_blank_with_palette(GSize size, GBitmapFormat format, GColor *palette,
+                                           bool free_palette) {
+  (void)size; (void)format;
+  check(free_palette, "weather bitmap owns its palette");
+  GBitmap *bitmap = calloc(1, sizeof(*bitmap));
+  if (bitmap) bitmap->palette = palette;
+  return bitmap;
+}
+void gbitmap_destroy(GBitmap *bitmap) { free(bitmap->palette); free(bitmap); }
+uint8_t *gbitmap_get_data(const GBitmap *bitmap) { return (uint8_t *)bitmap->data; }
+uint16_t gbitmap_get_bytes_per_row(const GBitmap *bitmap) { (void)bitmap; return 8; }
 
 #ifdef PBL_HEALTH
 HealthServiceAccessibilityMask health_service_metric_accessible(HealthMetric metric,
@@ -375,7 +459,7 @@ static void start(DialSecondsMode mode) {
   prv_init();
   check(f.window.live && f.layer.live && f.font_live && f.atlas_live,
         "successful startup owns all drawing resources");
-  check(f.focus && f.battery && f.tick && f.inbox && f.dropped,
+  check(f.focus && f.tick && f.inbox && f.dropped,
         "successful startup subscribes event handlers");
   check(f.tick_units == (mode == DialSecondsAlways ? SECOND_UNIT : MINUTE_UNIT),
         "startup selects seconds only for Always");
@@ -426,6 +510,58 @@ int main(int argc, char **argv) {
     check(f.null_calls == 0, "cleanup before initialization is harmless");
     check(f.window_destroys == 0 && f.layer_destroys == 0 && f.font_unloads == 0,
           "empty cleanup does not free unowned resources");
+  } else if (strcmp(scenario, "music-layout") == 0) {
+    start(DialSecondsOff);
+    s_center_order = CenterMusic + 1;
+    strcpy(s_music_title, "Agyp");
+    struct tm now = { .tm_wday = 0, .tm_mon = 10, .tm_mday = 8 };
+    GContext context = { 0 };
+    f.capture_music = true;
+    f.date_top = -1;
+    prv_draw_center(&context, f.layer.bounds, &now);
+    check(f.music_rect.size.w > 0 && f.date_top >= 0, "draw music and date");
+    if (CENTER_CAP_HEIGHT < 12) {
+      check(f.music_rect.size.h >= 16, "music box fits the system font");
+      check(f.music_rect.origin.y + f.music_rect.size.h + CENTER_GAP <= f.date_top,
+            "music box leaves a clear gap above the date");
+    }
+    f.capture_music = false;
+    prv_deinit();
+    assert_clean();
+  } else if (strcmp(scenario, "notification-layout") == 0) {
+    start(DialSecondsOff);
+    s_center_order = CenterNotifications + 1;
+    struct tm now = { .tm_wday = 0, .tm_mon = 10, .tm_mday = 8 };
+    GContext context = { 0 };
+    int middle_top = f.layer.bounds.size.h / 2
+                     + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, 1);
+    for (int count = 1; count <= 999; count = count * 10 + 9) {
+      s_notification_count = count;
+      f.capture_center_lines = true;
+      f.center_line_count = 0;
+      f.date_top = -1;
+      graphics_context_set_stroke_width(&context, 3);
+      graphics_context_set_antialiased(&context, true);
+      prv_draw_center(&context, f.layer.bounds, &now);
+      check(f.center_line_count == 5 && f.date_top >= 0, "draw bell and date");
+      for (int i = 0; i < f.center_line_count; i++) {
+        GPoint start = f.center_lines[i].start, end = f.center_lines[i].end;
+        check(f.center_lines[i].stroke_width == 1 && !f.center_lines[i].antialiased,
+              "bell stroke stays within its pixel geometry");
+        check(start.y >= middle_top && end.y >= middle_top
+              && start.y < middle_top + CENTER_CAP_HEIGHT
+              && end.y < middle_top + CENTER_CAP_HEIGHT,
+              "bell stays within the middle cap-height bounds");
+        check(start.y < f.date_top - CENTER_GAP && end.y < f.date_top - CENTER_GAP,
+              "bell leaves a clear gap above the date");
+        check(start.x >= 0 && end.x >= 0 && start.x < f.layer.bounds.size.w
+              && end.x < f.layer.bounds.size.w, "bell stays within screen bounds");
+      }
+      check(f.antialiased, "restore antialiasing after the bell");
+    }
+    f.capture_center_lines = false;
+    prv_deinit();
+    assert_clean();
   } else if (strcmp(scenario, "minute-layout") == 0) {
     start(DialSecondsOff);
     f.capture = true;
@@ -499,14 +635,161 @@ int main(int argc, char **argv) {
       f.disable_steps_saved = true;
       f.disable_steps = strcmp(scenario, "disable-steps-saved") == 0 ? 1 : 2;
     }
+    if (strcmp(scenario, "weather") == 0 || strcmp(scenario, "center-saved") == 0) {
+      f.center_saved = true;
+      f.center = CenterWeather;
+    }
     start(mode);
-    if (strcmp(scenario, "always") == 0 || strcmp(scenario, "off") == 0) {
+    if (strcmp(scenario, "weather") == 0) {
+      check(f.weather_requests == 1 && !f.battery_live, "saved weather requests a reading without battery subscription");
+      TupleValue unit_value = { .int32 = 1 }, temperature_value = { .int32 = -3 };
+      union { TupleValue align; uint8_t bytes[50]; } pixel_data = { 0 };
+      union { TupleValue align; uint8_t bytes[16]; } palette_data = { 0 };
+      Tuple unit = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &unit_value };
+      Tuple temperature = { .type = TUPLE_INT, .length = sizeof(int32_t),
+                            .value = &temperature_value };
+      Tuple pixels = { .type = TUPLE_BYTE_ARRAY, .length = 50, .value = &pixel_data.align };
+      Tuple palette = { .type = TUPLE_BYTE_ARRAY, .length = 16, .value = &palette_data.align };
+      DictionaryIterator message = { .weather_unit = &unit, .temperature = &temperature,
+                                     .pixels = &pixels, .palette = &palette };
+      int dirty = f.dirty;
+      f.inbox(&message, NULL);
+      check(s_weather_unit == 1 && s_weather_temperature == -3 && s_weather_icon,
+            "weather update displays temperature and icon");
+      check(f.dirty == dirty + 1, "weather update redraws");
+      app_event_loop();
+      pixels.length = 49;
+      f.inbox(&message, NULL);
+      check(!s_weather_icon && f.errors > 0, "malformed icon is rejected");
+      temperature_value.int32 = 1000;
+      f.inbox(&message, NULL);
+      check(s_weather_temperature == -3, "invalid temperatures do not overwrite the reading");
+      unit_value.int32 = 0;
+      f.inbox(&message, NULL);
+      check(s_weather_unit == 0 && !s_weather_icon, "unavailable weather clears the display");
+      unit_value.int32 = 1;
+      temperature_value.int32 = 10;
+      TupleValue expiry_value = { .int32 = (int32_t)time(NULL) + 60 };
+      Tuple expires = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &expiry_value };
+      message.expires = &expires;
+      message.pixels = NULL;
+      message.palette = NULL;
+      f.inbox(&message, NULL);
+      check(s_weather_unit == 1, "unexpired reading is displayed");
+      s_weather_expires = (int32_t)time(NULL) - 1;
+      struct tm now = { 0 };
+      f.tick(&now, MINUTE_UNIT);
+      check(s_weather_unit == 0, "expired reading is cleared on minute tick");
+      expiry_value.int32 = (int32_t)time(NULL) - 1;
+      f.inbox(&message, NULL);
+      check(s_weather_unit == 0, "already expired reading is not displayed");
+    } else if (strcmp(scenario, "center-saved") == 0) {
+      check(prv_center_enabled(CenterWeather) && f.weather_requests == 1 && !f.battery_live,
+            "saved weather selection is restored independently of step settings");
+    } else if (strcmp(scenario, "center") == 0) {
+      check(prv_center_selected() == CenterBattery && f.battery_live && f.weather_requests == 0,
+            "battery is default and does not request weather");
+      TupleValue value = { .int32 = CenterNone };
+      Tuple center = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &value };
+      DictionaryIterator iter = { .center = &center };
+      f.inbox(&iter, NULL);
+      check(prv_center_selected() == CenterNone && !f.battery_live && f.center_saved && f.center == CenterNone + 1,
+            "none persists and stops battery updates");
+      value.int32 = CenterWeather;
+      f.inbox(&iter, NULL);
+      check(prv_center_enabled(CenterWeather) && !f.battery_live && f.center == CenterWeather + 1,
+            "weather selection persists");
+      TupleValue unit_value = { .int32 = 1 }, temperature_value = { .int32 = 18 };
+      Tuple unit = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &unit_value };
+      Tuple temperature = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &temperature_value };
+      DictionaryIterator weather = { .weather_unit = &unit, .temperature = &temperature };
+      f.inbox(&weather, NULL);
+      check(s_weather_unit == 1, "selected weather accepts readings");
+      value.int32 = CenterBattery;
+      f.inbox(&iter, NULL);
+      check(prv_center_selected() == CenterBattery && f.battery_live && !s_weather_unit,
+            "battery selection clears weather and resumes battery updates");
+      f.inbox(&weather, NULL);
+      check(!s_weather_unit, "late weather cannot restore a reading after opting out");
+      int dirty = f.dirty;
+      f.battery(battery_state_service_peek());
+      check(f.dirty == dirty + 1, "battery updates redraw battery mode");
+      value.int32 = 3;
+      int errors = f.errors;
+      f.inbox(&iter, NULL);
+      check(f.errors > errors && prv_center_selected() == CenterBattery && f.center == CenterBattery + 1,
+            "invalid center selection is rejected");
+      TupleValue order_value = { .int32 = 4 | (5 << 3) | (3 << 6) | (1 << 9) };
+      Tuple order = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &order_value };
+      DictionaryIterator priority = { .order = &order };
+      f.inbox(&priority, NULL);
+      check(prv_center_selected() == CenterBattery && f.battery_live, "empty sources fall through to battery");
+      f.inbox(&weather, NULL);
+      check(prv_center_selected() == CenterWeather, "weather beats battery");
+      TupleValue count_value = { .int32 = 2 };
+      Tuple count = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &count_value };
+      DictionaryIterator count_message = { .notifications = &count };
+      f.inbox(&count_message, NULL);
+      check(prv_center_selected() == CenterNotifications, "notifications beat weather");
+      union { TupleValue align; char text[8]; } title = { .text = "Track" };
+      Tuple music = { .type = TUPLE_CSTRING, .length = 6, .value = &title.align };
+      DictionaryIterator music_message = { .music = &music };
+      f.inbox(&music_message, NULL);
+      check(prv_center_selected() == CenterMusic, "music takes first priority");
+      title.text[0] = '\0'; music.length = 1;
+      f.inbox(&music_message, NULL);
+      check(prv_center_selected() == CenterNotifications, "paused music falls through");
+      count_value.int32 = 0;
+      f.inbox(&count_message, NULL);
+      check(prv_center_selected() == CenterWeather, "zero notifications fall through");
+      strcpy(title.text, "Track"); music.length = 6;
+      TupleValue expiry_value = { .int32 = (int32_t)time(NULL) + 60 };
+      Tuple expires = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &expiry_value };
+      music_message.music_expires = &expires;
+      f.inbox(&music_message, NULL);
+      check(prv_center_selected() == CenterMusic, "unexpired music is usable");
+      s_music_expires = (int32_t)time(NULL) - 1;
+      struct tm now = { 0 };
+      f.tick(&now, MINUTE_UNIT);
+      check(prv_center_selected() == CenterWeather, "expired music falls through on a minute tick");
+      order_value.int32 = 4 | (4 << 3);
+      errors = f.errors;
+      f.inbox(&priority, NULL);
+      check(f.errors > errors && prv_center_selected() == CenterWeather, "duplicate priority is rejected");
+      order_value.int32 = 6 | (1 << 3);
+      f.inbox(&priority, NULL);
+      check(prv_center_selected() == CenterBattery, "empty shared order falls back to battery");
+      TupleValue index_value = { .int32 = 1 }, kind_value = { .int32 = 1 };
+      TupleValue slot_expiry_value = { .int32 = (int32_t)time(NULL) + 60 };
+      union { TupleValue align; char text[8]; } slot_title = { .text = "Track" };
+      Tuple index = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &index_value };
+      Tuple kind = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &kind_value };
+      Tuple slot_text = { .type = TUPLE_CSTRING, .length = 6, .value = &slot_title.align };
+      Tuple slot_expires = { .type = TUPLE_INT, .length = sizeof(int32_t), .value = &slot_expiry_value };
+      DictionaryIterator slot = { .slot_index = &index, .slot_kind = &kind,
+        .slot_text = &slot_text, .slot_expires = &slot_expires };
+      f.inbox(&slot, NULL);
+      check(prv_center_selected() == CenterPlugin && !strcmp(s_center_slots[1].text, "Track"),
+            "shared complication is shown");
+      index_value.int32 = 0;
+      strcpy(slot_title.text, "First"); slot_text.length = 6;
+      f.inbox(&slot, NULL);
+      check(!strcmp(s_center_slots[0].text, "First"), "higher-priority slot is retained");
+      s_center_slots[0].expires = (int32_t)time(NULL) - 1;
+      check(prv_center_selected() == CenterPlugin && s_center_slots[1].kind,
+            "expired priority falls through to another cached slot");
+      s_center_slots[1].expires = (int32_t)time(NULL) - 1;
+      check(prv_center_selected() == CenterBattery, "expired shared slots fall back to battery");
+      order_value.int32 = 1;
+      f.inbox(&priority, NULL);
+      check(!s_center_slots[0].kind && !s_center_slots[1].kind, "opting out clears shared readings");
+      f.inbox(&slot, NULL);
+      check(!s_center_slots[0].kind, "late shared reading is ignored after opting out");
+    } else if (strcmp(scenario, "always") == 0 || strcmp(scenario, "off") == 0) {
       int dirty = f.dirty;
       struct tm now = { 0 };
       f.tick(&now, f.tick_units);
       check(f.dirty == dirty + 1, "normal tick redraws the dial");
-      f.battery((BatteryChargeState){ .charge_percent = 20 });
-      check(f.dirty == dirty + 2, "battery event redraws the dial");
       prv_tap(ACCEL_AXIS_Z, 1);
       check(f.timer_count == 0, "Always/Off ignore tap gestures");
       app_event_loop();
@@ -546,8 +829,7 @@ int main(int argc, char **argv) {
       int dirty = f.dirty;
       struct tm now = { 0 };
       f.tick(&now, MINUTE_UNIT);
-      f.battery((BatteryChargeState){ .charge_percent = 70 });
-      check(f.dirty == dirty, "background ticks and battery events do not redraw");
+      check(f.dirty == dirty, "background ticks do not redraw");
       f.focus(true);
       check(f.tick_units == SECOND_UNIT && f.dirty > dirty,
             "Always restores seconds and redraws on focus regain");

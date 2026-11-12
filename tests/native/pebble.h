@@ -31,6 +31,23 @@
 #define MESSAGE_KEY_ShowSeconds 0
 #define MESSAGE_KEY_StepGoal 1
 #define MESSAGE_KEY_DisableSteps 2
+#define MESSAGE_KEY_WeatherTemperature 3
+#define MESSAGE_KEY_WeatherUnit 4
+#define MESSAGE_KEY_WeatherPixels 5
+#define MESSAGE_KEY_WeatherPalette 6
+#define MESSAGE_KEY_RequestWeather 7
+#define MESSAGE_KEY_WeatherExpires 8
+#define MESSAGE_KEY_CenterDisplay 9
+#define MESSAGE_KEY_CenterOrder 10
+#define MESSAGE_KEY_MusicTitle 11
+#define MESSAGE_KEY_NotificationCount 12
+#define MESSAGE_KEY_MusicExpires 13
+#define MESSAGE_KEY_NotificationsExpire 14
+#define MESSAGE_KEY_SlotReset 15
+#define MESSAGE_KEY_SlotIndex 16
+#define MESSAGE_KEY_SlotKind 17
+#define MESSAGE_KEY_SlotText 18
+#define MESSAGE_KEY_SlotExpires 19
 #define FONT_KEY_FONT_FALLBACK "RESOURCE_ID_GOTHIC_14"
 #define FONT_KEY_GOTHIC_14 "RESOURCE_ID_GOTHIC_14"
 #define FONT_KEY_GOTHIC_14_BOLD "RESOURCE_ID_GOTHIC_14_BOLD"
@@ -42,6 +59,7 @@ typedef struct { int16_t x, y; } GPoint;
 typedef struct { int16_t w, h; } GSize;
 typedef struct { GPoint origin; GSize size; } GRect;
 #define GPoint(x, y) ((GPoint){ (x), (y) })
+#define GSize(w, h) ((GSize){ (w), (h) })
 #define GRect(x, y, w, h) ((GRect){ { (x), (y) }, { (w), (h) } })
 typedef union { uint8_t argb; } GColor;
 #define GColorBlack ((GColor){ .argb = 0xc0 })
@@ -57,7 +75,9 @@ typedef enum { GOvalScaleModeFitCircle } GOvalScaleMode;
 typedef enum { GTextOverflowModeWordWrap, GTextOverflowModeTrailingEllipsis,
                GTextOverflowModeFill } GTextOverflowMode;
 typedef enum { GTextAlignmentLeft, GTextAlignmentCenter, GTextAlignmentRight } GTextAlignment;
-typedef enum { GBitmapFormat1Bit, GBitmapFormat8Bit, GBitmapFormat8BitCircular } GBitmapFormat;
+typedef enum { GBitmapFormat1Bit, GBitmapFormat8Bit, GBitmapFormat8BitCircular,
+               GBitmapFormat4BitPalette } GBitmapFormat;
+typedef enum { GCompOpAssign, GCompOpSet } GCompOp;
 typedef struct GContext { int unused; } GContext;
 typedef struct GBitmap GBitmap;
 typedef struct { uint8_t *data; int16_t min_x, max_x; } GBitmapDataRowInfo;
@@ -83,11 +103,18 @@ typedef void (*AccelTapHandler)(AccelAxisType, int32_t);
 typedef void (*AppTimerCallback)(void *);
 typedef enum { APP_MSG_OK = 0, APP_MSG_OUT_OF_MEMORY = 1 << 10 } AppMessageResult;
 typedef enum { TUPLE_BYTE_ARRAY, TUPLE_CSTRING, TUPLE_UINT, TUPLE_INT } TupleType;
-typedef union { int32_t int32; uint32_t uint32; } TupleValue;
+typedef union { int32_t int32; uint32_t uint32; uint8_t data[1]; } TupleValue;
 typedef struct { uint32_t key; TupleType type; uint16_t length; TupleValue *value; } Tuple;
-typedef struct DictionaryIterator { Tuple *seconds, *goal, *disable_steps; } DictionaryIterator;
+typedef struct DictionaryIterator {
+  Tuple *seconds, *goal, *disable_steps, *weather_unit, *temperature, *pixels, *palette, *expires, *center;
+  Tuple *order, *music, *notifications;
+  Tuple *slot_reset, *slot_index, *slot_kind, *slot_text, *slot_expires;
+  Tuple *music_expires, *notifications_expire;
+} DictionaryIterator;
 typedef void (*AppMessageInboxReceived)(DictionaryIterator *, void *);
 typedef void (*AppMessageInboxDropped)(AppMessageResult, void *);
+typedef void (*AppMessageOutboxFailed)(DictionaryIterator *, AppMessageResult, void *);
+typedef enum { DICT_OK = 0 } DictionaryResult;
 typedef enum { APP_LOG_LEVEL_ERROR = 1, APP_LOG_LEVEL_WARNING = 50,
                APP_LOG_LEVEL_INFO = 100 } AppLogLevel;
 void fake_app_log(AppLogLevel level, const char *format, ...);
@@ -131,7 +158,11 @@ int persist_write_int(int, int32_t);
 Tuple *dict_find(const DictionaryIterator *, uint32_t);
 AppMessageInboxReceived app_message_register_inbox_received(AppMessageInboxReceived);
 AppMessageInboxDropped app_message_register_inbox_dropped(AppMessageInboxDropped);
+AppMessageOutboxFailed app_message_register_outbox_failed(AppMessageOutboxFailed);
 AppMessageResult app_message_open(uint32_t, uint32_t);
+AppMessageResult app_message_outbox_begin(DictionaryIterator **);
+AppMessageResult app_message_outbox_send(void);
+DictionaryResult dict_write_uint8(DictionaryIterator *, uint32_t, uint8_t);
 void app_message_deregister_callbacks(void);
 void app_event_loop(void);
 bool clock_is_24h_style(void);
@@ -142,6 +173,10 @@ void graphics_context_set_stroke_color(GContext *, GColor);
 void graphics_context_set_text_color(GContext *, GColor);
 void graphics_context_set_stroke_width(GContext *, uint8_t);
 void graphics_context_set_antialiased(GContext *, bool);
+void graphics_context_set_compositing_mode(GContext *, GCompOp);
+void graphics_draw_bitmap_in_rect(GContext *, const GBitmap *, GRect);
+GSize graphics_text_layout_get_content_size(const char *, GFont, GRect,
+                                            GTextOverflowMode, GTextAlignment);
 void graphics_fill_rect(GContext *, GRect, uint16_t, GCornerMask);
 void graphics_fill_circle(GContext *, GPoint, uint16_t);
 void graphics_fill_radial(GContext *, GRect, GOvalScaleMode, uint16_t, int32_t, int32_t);
@@ -154,6 +189,10 @@ void gpath_destroy(GPath *);
 GBitmap *graphics_capture_frame_buffer(GContext *);
 void graphics_release_frame_buffer(GContext *, GBitmap *);
 GBitmapFormat gbitmap_get_format(const GBitmap *);
+GBitmap *gbitmap_create_blank_with_palette(GSize, GBitmapFormat, GColor *, bool);
+void gbitmap_destroy(GBitmap *);
+uint8_t *gbitmap_get_data(const GBitmap *);
+uint16_t gbitmap_get_bytes_per_row(const GBitmap *);
 GRect gbitmap_get_bounds(const GBitmap *);
 GBitmapDataRowInfo gbitmap_get_data_row_info(const GBitmap *, int16_t);
 
