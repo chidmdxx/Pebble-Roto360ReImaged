@@ -43,6 +43,8 @@ This follows Pebble's [battery guidance](https://developer.repebble.com/guides/b
 
 The phone companion provides an embedded, offline settings page. Shared complications use the Pebble app's [plugin preview](https://developer.repebble.com/guides/plugins/preview/): enable **Settings → Plugins → Plugins / permissions preview**, choose readings under **Settings → Plugins → Complications**, and enable the watchface's preview setting. Allow the relevant permissions if prompted. For weather, configure a location and units in the Pebble app. The companion subscribes to the selected sources and forwards their readings to the watch; the face makes no direct network requests and needs no API key. Text readings prefer the plugin's short text, falling back to long text when needed. Built-in Music and Notifications sources are Android-only. A selected notification entry displays the phone's dismissible notification-shade count instead of its chosen field or instance; ongoing entries and group summaries are excluded. Plugins are disabled by default and the preview API may change.
 
+Calendar event readings show the first upcoming event explicitly marked as not all-day with nonempty text for the selected field, rather than a fixed event index. All-day events and events with missing or malformed all-day flags are skipped. If none qualify, the existing complication preference order and battery/date fallback still apply.
+
 If the dial's resources or layer cannot be loaded, the face logs the failure and shows **ROTO360 ERROR / RESTART WATCHFACE** instead of a dial with missing time digits. Restart the face; if the error persists, reinstall it. A window allocation failure is logged but cannot display an error screen.
 
 ## Build and install

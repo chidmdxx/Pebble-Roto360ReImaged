@@ -118,6 +118,19 @@ function readingMessage(index, reading, update) {
     return result;
   }
   var instance = instances[reading.index];
+  if (reading.category === 'calendar' && reading.item === 'event') {
+    instance = null;
+    instances.some(function(candidate) {
+      var properties = candidate && candidate.properties;
+      var allDay = properties && properties.all_day && properties.all_day.boolean;
+      if (allDay && allDay.value === false &&
+          safeText(textOf(properties[reading.property]))) {
+        instance = candidate;
+        return true;
+      }
+      return false;
+    });
+  }
   var props = instance && instance.properties;
   if (!props) return result;
   if (reading.category === 'music' && reading.item === 'track' &&
@@ -160,6 +173,8 @@ function resetSlots() {
 
 function subscribeReading(reading, index, activeGeneration) {
   var properties = [reading.property];
+  if (reading.category === 'calendar' && reading.item === 'event' &&
+      properties.indexOf('all_day') < 0) properties.push('all_day');
   if (reading.category === 'music' && reading.item === 'track' &&
       properties.indexOf('playing') < 0) properties.push('playing');
   if (reading.category === 'weather' && reading.item === 'location' &&

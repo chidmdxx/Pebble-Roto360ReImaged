@@ -210,6 +210,59 @@ test('shared preferences subscribe in order, preserving properties and instance 
   assert.equal(last(phone).SlotText, '2');
 });
 
+test('calendar requests all_day and selects the first explicitly timed nonempty event', () => {
+  const phone = previewPhone();
+  setPreferred(phone, reading('calendar', 'event', 'title', 9));
+  const calendar = phone.subscriptions[1];
+  assert.deepEqual(Array.from(calendar.properties), ['title', 'all_day']);
+  const event = (title, value) => ({ properties: {
+    title: { shortText: { text: title } }, all_day: { boolean: { value } }
+  } });
+  calendar.onData({ instances: [
+    event('All day', true), event('No boolean', undefined), event('Not a boolean', 'false'),
+    event(' ', false), event('\u0000', false),
+    event('First meeting', false), event('Later meeting', false)
+  ] });
+  assert.equal(last(phone).SlotText, 'First meeting');
+  assert.equal(last(phone).SlotKind, 1);
+  assert.equal(last(phone).SlotIndex, 0);
+  calendar.onData({ instances: [{ properties: {
+    all_day: { boolean: { value: false } },
+    title: { shortText: { text: ' ' }, longText: { text: 'Long title' } }
+  } }] });
+  assert.equal(last(phone).SlotText, 'Long title');
+});
+
+test('calendar missing or malformed flags and empty text clear only its preference slot', () => {
+  const phone = previewPhone();
+  setPreferred(phone, reading('calendar', 'event', 'title'),
+    reading('finance', 'stock', 'price'));
+  const calendar = phone.subscriptions[1], fallback = phone.subscriptions[2];
+  fallback.onData({ instances: [{ properties: {
+    price: { shortText: { text: 'Fallback reading' } }
+  } }] });
+  for (const all_day of [undefined, null, {}, { boolean: null },
+    { boolean: {} }, { boolean: { value: 0 } }, { boolean: { value: true } }]) {
+    calendar.onData({ instances: [null, {}, { properties: {
+      title: { shortText: { text: 'Not eligible' } }, all_day
+    } }] });
+    assert.equal(last(phone).SlotKind, 0);
+    assert.equal(last(phone).SlotIndex, 0);
+    assert.equal(phone.context.slotMessages[1].SlotText, 'Fallback reading');
+  }
+  for (const title of [undefined, {}, { shortText: { text: '' } },
+    { numericValue: { value: 42 } }, { longText: { text: ' \t ' } }]) {
+    calendar.onData({ instances: [{ properties: {
+      title, all_day: { boolean: { value: false } }
+    } }] });
+    assert.equal(last(phone).SlotKind, 0);
+  }
+  calendar.onData({ instances: [] });
+  assert.equal(last(phone).SlotKind, 0);
+  setPreferred(phone, reading('calendar', 'event', 'all_day'));
+  assert.deepEqual(Array.from(phone.subscriptions.at(-1).properties), ['all_day']);
+});
+
 test('weather uses chosen instance and units and forwards Pebble condition pixels', () => {
   const phone = previewPhone();
   setPreferred(phone, reading('weather', 'location', 'temperature', 1));
