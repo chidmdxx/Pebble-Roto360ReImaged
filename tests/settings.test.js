@@ -212,7 +212,7 @@ test('shared preferences subscribe in order, preserving properties and instance 
 
 test('calendar requests all_day and selects the first explicitly timed nonempty event', () => {
   const phone = previewPhone();
-  setPreferred(phone, reading('calendar', 'event', 'title', 9));
+  setPreferred(phone, reading('calendar', 'event', 'title'));
   const calendar = phone.subscriptions[1];
   assert.deepEqual(Array.from(calendar.properties), ['title', 'all_day']);
   const event = (title, value) => ({ properties: {
@@ -231,6 +231,28 @@ test('calendar requests all_day and selects the first explicitly timed nonempty 
     title: { shortText: { text: ' ' }, longText: { text: 'Long title' } }
   } }] });
   assert.equal(last(phone).SlotText, 'Long title');
+});
+
+test('calendar scans forward from the configured event index, never earlier events', () => {
+  const phone = previewPhone();
+  setPreferred(phone, reading('calendar', 'event', 'title', 2));
+  const calendar = phone.subscriptions[1];
+  const event = (title, value) => ({ properties: {
+    title: { shortText: { text: title } }, all_day: { boolean: { value } }
+  } });
+  calendar.onData({ instances: [
+    event('Earlier meeting', false), event('Another earlier meeting', false),
+    event('All day at selected index', true), event('Next eligible meeting', false),
+    event('Later meeting', false)
+  ] });
+  assert.equal(last(phone).SlotText, 'Next eligible meeting');
+  calendar.onData({ instances: [
+    event('Earlier meeting', false), event('Another earlier meeting', false),
+    event('Selected timed meeting', false), event('Later meeting', false)
+  ] });
+  assert.equal(last(phone).SlotText, 'Selected timed meeting');
+  calendar.onData({ instances: [event('Earlier meeting', false)] });
+  assert.equal(last(phone).SlotKind, 0);
 });
 
 test('calendar missing or malformed flags and empty text clear only its preference slot', () => {

@@ -120,7 +120,7 @@ function readingMessage(index, reading, update) {
   var instance = instances[reading.index];
   if (reading.category === 'calendar' && reading.item === 'event') {
     instance = null;
-    instances.some(function(candidate) {
+    instances.slice(reading.index).some(function(candidate) {
       var properties = candidate && candidate.properties;
       var allDay = properties && properties.all_day && properties.all_day.boolean;
       if (allDay && allDay.value === false &&
