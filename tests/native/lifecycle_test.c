@@ -60,7 +60,7 @@ static struct {
   int sectors, label_count;
   bool capture_center_lines, capture_music, antialiased;
   uint8_t stroke_width;
-  int center_line_count, date_top;
+  int center_line_count, date_top, weekday_top;
   GRect music_rect;
   struct {
     GPoint start, end;
@@ -395,6 +395,9 @@ void graphics_draw_text(GContext *context, const char *text, GFont font, GRect r
   if ((f.capture_center_lines || f.capture_music) && strcmp(text, "NOV 08") == 0) {
     f.date_top = rect.origin.y + CENTER_FONT_SIZE - CENTER_CAP_HEIGHT;
   }
+  if (f.capture_music && strcmp(text, "SUNDAY") == 0) {
+    f.weekday_top = rect.origin.y + CENTER_FONT_SIZE - CENTER_CAP_HEIGHT;
+  }
   if (f.capture_music && strcmp(text, "Agyp") == 0) {
     f.music_rect = rect;
     check(font == &f.system_font && overflow == GTextOverflowModeTrailingEllipsis,
@@ -512,18 +515,27 @@ int main(int argc, char **argv) {
           "empty cleanup does not free unowned resources");
   } else if (strcmp(scenario, "music-layout") == 0) {
     start(DialSecondsOff);
-    s_center_order = CenterMusic + 1;
     strcpy(s_music_title, "Agyp");
+    s_center_slots[0].kind = 1;
+    strcpy(s_center_slots[0].text, "Agyp");
     struct tm now = { .tm_wday = 0, .tm_mon = 10, .tm_mday = 8 };
     GContext context = { 0 };
     f.capture_music = true;
-    f.date_top = -1;
-    prv_draw_center(&context, f.layer.bounds, &now);
-    check(f.music_rect.size.w > 0 && f.date_top >= 0, "draw music and date");
-    if (CENTER_CAP_HEIGHT < 12) {
+    for (int plugin = 0; plugin < 2; plugin++) {
+      s_center_order = (plugin ? CenterPlugin : CenterMusic) + 1;
+      f.date_top = f.weekday_top = -1;
+      f.music_rect = GRect(0, 0, 0, 0);
+      prv_draw_center(&context, f.layer.bounds, &now);
+      int center = f.layer.bounds.size.h / 2;
+      check(f.music_rect.size.w > 0 && f.date_top >= 0 && f.weekday_top >= 0,
+            "draw title, weekday and date");
       check(f.music_rect.size.h >= 16, "music box fits the system font");
-      check(f.music_rect.origin.y + f.music_rect.size.h + CENTER_GAP <= f.date_top,
-            "music box leaves a clear gap above the date");
+      check(f.music_rect.origin.y + 10 == center, "title glyph bounds center on the dial");
+      check(f.weekday_top == center + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, 0),
+            "title does not move the weekday");
+      check(f.date_top == center + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, 2)
+            + (CENTER_CAP_HEIGHT < 12 ? 2 : 0), "title preserves the date position");
+      check(f.music_rect.origin.y + 15 < f.date_top, "title descenders stay above the date");
     }
     f.capture_music = false;
     prv_deinit();

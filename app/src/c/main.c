@@ -393,7 +393,8 @@ static void prv_draw_center(GContext *ctx, GRect bounds, const struct tm *now) {
     if (i == 1 && text_reading) {
       int width = bounds.size.w * MINUTE_INNER / 1000 - 4;
       int height = CENTER_FONT_SIZE + 2 < 16 ? 16 : CENTER_FONT_SIZE + 2;
-      text_box = GRect(center.x - width / 2, y, width, height);
+      // Gothic 14's visible ascenders and descenders occupy rows 5 through 15.
+      text_box = GRect(center.x - width / 2, center.y - 10, width, height);
     }
     graphics_draw_text(ctx, lines[i], i == 1 && text_reading
                          ? fonts_get_system_font(FONT_KEY_GOTHIC_14) : s_center_font,
