@@ -1,7 +1,7 @@
 {
   "name": "roto360-reimaged",
   "author": "chidmdxx",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "private": true,
   "pebble": {
     "displayName": "Roto360 reimaged",
@@ -13,7 +13,14 @@
       "watchface": true
     },
     "capabilities": ["configurable", "health"],
-    "messageKeys": ["ShowSeconds", "StepGoal", "DisableSteps"],
+    "usesPermissions": [
+      { "name": "Location", "reason": "To show weather for your saved location", "required": false },
+      { "name": "ReadMusic", "reason": "To show the current track", "required": false },
+      { "name": "Notifications", "reason": "To count phone notifications", "required": false },
+      { "name": "Health", "reason": "To show step progress", "required": false },
+      { "name": "ShowNotifications", "reason": "To report settings errors", "required": false }
+    ],
+    "messageKeys": ["ShowSeconds", "StepGoal", "DisableSteps", "WeatherTemperature", "WeatherUnit", "WeatherPixels", "WeatherPalette", "RequestWeather", "WeatherExpires", "CenterDisplay", "CenterOrder", "MusicTitle", "NotificationCount", "MusicExpires", "NotificationsExpire", "SlotReset", "SlotIndex", "SlotKind", "SlotText", "SlotExpires"],
     "resources": {
       "media": [
         {
@@ -25,28 +32,28 @@
           "type": "font",
           "name": "FONT_BEBAS_12",
           "file": "fonts/BebasNeue-Regular.ttf",
-          "characterRegex": "[A-Z0-9%+ ]",
+          "characterRegex": "[A-Z0-9%+ \\-]",
           "targetPlatforms": ["basalt"]
         },
         {
           "type": "font",
           "name": "FONT_BEBAS_14",
           "file": "fonts/BebasNeue-Regular.ttf",
-          "characterRegex": "[A-Z0-9%+ ]",
+          "characterRegex": "[A-Z0-9%+ \\-]",
           "targetPlatforms": ["chalk"]
         },
         {
           "type": "font",
           "name": "FONT_BEBAS_18",
           "file": "fonts/BebasNeue-Regular.ttf",
-          "characterRegex": "[A-Z0-9%+ ]",
+          "characterRegex": "[A-Z0-9%+ \\-]",
           "targetPlatforms": ["emery"]
         },
         {
           "type": "font",
           "name": "FONT_BEBAS_20",
           "file": "fonts/BebasNeue-Regular.ttf",
-          "characterRegex": "[A-Z0-9%+ ]",
+          "characterRegex": "[A-Z0-9%+ \\-]",
           "targetPlatforms": ["gabbro"]
         }
       ]

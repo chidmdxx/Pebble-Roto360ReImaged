@@ -12,7 +12,8 @@ const scenarios = [
   'main', 'minute-layout', 'always', 'off', 'shake', 'timer-failure', 'focus', 'cleanup',
   'health', 'health-subscription-failure', 'message-failure', 'partial-cleanup',
   'disable-steps', 'disable-steps-saved', 'disable-steps-invalid-saved', 'disable-steps-invalid',
-  'disable-steps-save-failure', 'disable-steps-subscription-failure'
+  'disable-steps-save-failure', 'disable-steps-subscription-failure', 'weather', 'center', 'center-saved',
+  'notification-layout', 'music-layout'
 ];
 
 test('native watchface lifecycle and fault injection', async t => {

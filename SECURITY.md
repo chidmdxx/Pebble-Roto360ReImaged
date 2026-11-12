@@ -74,10 +74,14 @@ installed app with contents-write permissions is a separate trust decision.
   checks vulnerable dependencies and updates actions; it does not find secrets.
   Update the pinned Gitleaks version and checksum together after reviewing its
   release; Dependabot does not update this downloaded binary.
-- The phone-side JavaScript provides only an embedded offline settings page
-  and validates the seconds mode and daily step goal before sending them to the
-  watch. It makes no network requests and collects no account, watch or location
-  data. Step totals are read locally through Pebble Health and never sent to
+- The phone-side JavaScript provides an embedded offline settings page,
+  validates settings, and subscribes to the shared complication preferences and
+  their selected sources only when preview is enabled. Weather, Music and
+  Notifications use optional Location, ReadMusic and Notifications permissions
+  respectively; other selected sources may request their own permissions. Battery and Nothing
+  need no plugin permissions. The weather provider is managed by
+  the Pebble app; this watchface makes no direct network requests. Step totals
+  are read locally through Pebble Health and never sent to
   the phone or a server; sleep data is not read. Its tests,
   the native harness and compiler checks are not a security scan.
   Review the pinned Pebble CLI/SDK and their transitive Python

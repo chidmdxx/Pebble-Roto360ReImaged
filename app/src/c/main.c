@@ -24,6 +24,8 @@
 #define SETTINGS_KEY_SECONDS 1
 #define SETTINGS_KEY_STEP_GOAL 2
 #define SETTINGS_KEY_DISABLE_STEPS 3
+#define SETTINGS_KEY_CENTER_DISPLAY 4
+#define SETTINGS_KEY_CENTER_ORDER 5
 #define SECONDS_GLANCE_MS 10000
 
 // Ring proportions, as fractions of the dial radius in 1/1000ths.
@@ -65,6 +67,27 @@ static bool s_disable_steps;
 static int32_t s_steps;
 static bool s_steps_available;
 static bool s_steps_initialized;
+typedef enum { CenterBattery, CenterNone, CenterWeather, CenterMusic, CenterNotifications,
+               CenterPlugin } CenterDisplay;
+typedef struct {
+  char text[73];
+  int32_t expires;
+  uint8_t kind;
+  GBitmap *icon;
+} CenterSlot;
+static CenterSlot s_center_slots[5];
+static uint32_t s_center_order = 1;
+static bool s_battery_subscribed;
+static char s_music_title[73];
+static int32_t s_notification_count;
+static int32_t s_music_expires;
+static int32_t s_notifications_expire;
+static int32_t s_weather_temperature;
+static int32_t s_weather_unit;
+static int32_t s_weather_expires;
+static GBitmap *s_weather_icon;
+static void prv_clear_weather_icon(void);
+static void prv_clear_center_slots(void);
 #if defined(PBL_HEALTH)
 static bool s_health_subscribed;
 #endif
@@ -260,32 +283,123 @@ static void prv_draw_label(GBitmap *fb, const Dial *dial, int value, DialTrack t
   numerals_draw(fb, text, at, normal, height, color);
 }
 
-static void prv_draw_center(GContext *ctx, GRect bounds, const struct tm *now) {
-  char battery[6];
-  char date[8];
-  BatteryChargeState charge = battery_state_service_peek();
-  dial_format_battery(battery, sizeof(battery), charge.charge_percent, charge.is_charging);
-  dial_format_date(date, sizeof(date), now->tm_mon, now->tm_mday);
-
-  GColor battery_color = GColorWhite;
-  if (charge.is_charging) {
-    battery_color = GColorGreen;
-  } else if (charge.charge_percent <= 20) {
-    battery_color = GColorRed;
+static bool prv_center_enabled(CenterDisplay target) {
+  for (int i = 0; i < 5; i++) {
+    uint32_t value = (s_center_order >> (i * 3)) & 7;
+    if (!value) break;
+    CenterDisplay item = (CenterDisplay)(value - 1);
+    if (item == target) return true;
+    if (item == CenterBattery || item == CenterNone) break;
   }
+  return false;
+}
 
-  const char *lines[] = { dial_day_name(now->tm_wday), battery, date };
-  GColor colors[] = { GColorWhite, battery_color, GColorWhite };
+static CenterDisplay prv_center_selected(void) {
+  for (int i = 0; i < 5; i++) {
+    uint32_t value = (s_center_order >> (i * 3)) & 7;
+    if (!value) break;
+    CenterDisplay item = (CenterDisplay)(value - 1);
+    if (item == CenterBattery || item == CenterNone ||
+        (item == CenterWeather && s_weather_unit) ||
+        (item == CenterMusic && s_music_title[0]) ||
+        (item == CenterNotifications && s_notification_count > 0)) return item;
+    if (item == CenterPlugin) {
+      for (int slot = 0; slot < 5; slot++) {
+        CenterSlot *reading = &s_center_slots[slot];
+        if (reading->kind && (!reading->expires || time(NULL) < reading->expires)) return item;
+      }
+    }
+  }
+  return CenterNone;
+}
+
+static void prv_draw_center(GContext *ctx, GRect bounds, const struct tm *now) {
+  char center_text[16] = "";
+  char date[8];
+  GColor center_color = GColorWhite;
+  CenterDisplay selected = prv_center_selected();
+  CenterSlot *plugin = NULL;
+  if (selected == CenterPlugin) {
+    for (int i = 0; i < 5; i++) {
+      CenterSlot *reading = &s_center_slots[i];
+      if (reading->kind && (!reading->expires || time(NULL) < reading->expires)) {
+        plugin = reading;
+        break;
+      }
+    }
+  }
+  dial_format_date(date, sizeof(date), now->tm_mon, now->tm_mday);
+  if (selected == CenterBattery) {
+    BatteryChargeState charge = battery_state_service_peek();
+    dial_format_battery(center_text, sizeof(center_text), charge.charge_percent, charge.is_charging);
+    center_color = charge.is_charging ? GColorGreen :
+                   (charge.charge_percent <= 20 ? GColorRed : GColorWhite);
+  } else if (selected == CenterWeather) {
+    if (s_weather_unit) {
+      snprintf(center_text, sizeof(center_text), "%ld %c", (long)s_weather_temperature,
+               s_weather_unit == 1 ? 'C' : 'F');
+    } else {
+      snprintf(center_text, sizeof(center_text), "--");
+    }
+  } else if (selected == CenterNotifications) {
+    snprintf(center_text, sizeof(center_text), "%ld", (long)s_notification_count);
+  }
+  const char *lines[] = { dial_day_name(now->tm_wday),
+    plugin ? plugin->text : selected == CenterMusic ? s_music_title : center_text, date };
+  GBitmap *weather_icon = plugin && plugin->kind == 2 ? plugin->icon : s_weather_icon;
+  bool weather = selected == CenterWeather || (plugin && plugin->kind == 2);
+  bool notification = selected == CenterNotifications || (plugin && plugin->kind == 3);
+  bool text_reading = selected == CenterMusic || (plugin && plugin->kind == 1);
   GPoint center = grect_center_point(&bounds);
   int box_w = bounds.size.w;
   for (int i = 0; i < 3; i++) {
     // Bebas capitals occupy [font size - cap height, font size) in the SDK font.
     int y = center.y + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, i)
             - (CENTER_FONT_SIZE - CENTER_CAP_HEIGHT);
-    graphics_context_set_text_color(ctx, colors[i]);
-    graphics_draw_text(ctx, lines[i], s_center_font,
-                       GRect(bounds.origin.x, y, box_w, CENTER_FONT_SIZE + 2),
-                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    if (text_reading && CENTER_CAP_HEIGHT < 12) {
+      if (i == 1) y -= 2;
+      if (i == 2) y += 2;
+    }
+    graphics_context_set_text_color(ctx, i == 1 ? center_color : GColorWhite);
+    GRect text_box = GRect(bounds.origin.x, y, box_w, CENTER_FONT_SIZE + 2);
+    if (i == 1 && weather && weather_icon) {
+      int width = graphics_text_layout_get_content_size(lines[i], s_center_font, text_box,
+          GTextOverflowModeFill, GTextAlignmentCenter).w;
+      int x = center.x - (10 + 2 + width) / 2;
+      graphics_context_set_compositing_mode(ctx, GCompOpSet);
+      graphics_draw_bitmap_in_rect(ctx, weather_icon,
+          GRect(x, center.y + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, i)
+                + (CENTER_CAP_HEIGHT - 10) / 2, 10, 10));
+      graphics_context_set_compositing_mode(ctx, GCompOpAssign);
+      text_box = GRect(x + 12, y, width, CENTER_FONT_SIZE + 2);
+    }
+    if (i == 1 && notification) {
+      int width = graphics_text_layout_get_content_size(lines[i], s_center_font, text_box,
+        GTextOverflowModeFill, GTextAlignmentCenter).w;
+      int x = center.x - (8 + width) / 2;
+      int bell_y = center.y + dial_center_line_top(CENTER_CAP_HEIGHT, CENTER_GAP, i)
+                   + (CENTER_CAP_HEIGHT - 8) / 2;
+      graphics_context_set_stroke_color(ctx, GColorWhite);
+      graphics_context_set_stroke_width(ctx, 1);
+      graphics_context_set_antialiased(ctx, false);
+      graphics_draw_line(ctx, GPoint(x + 1, bell_y + 2), GPoint(x + 1, bell_y + 5));
+      graphics_draw_line(ctx, GPoint(x + 5, bell_y + 2), GPoint(x + 5, bell_y + 5));
+      graphics_draw_line(ctx, GPoint(x + 2, bell_y + 1), GPoint(x + 4, bell_y + 1));
+      graphics_draw_line(ctx, GPoint(x, bell_y + 6), GPoint(x + 6, bell_y + 6));
+      graphics_draw_line(ctx, GPoint(x + 3, bell_y + 7), GPoint(x + 3, bell_y + 7));
+      graphics_context_set_antialiased(ctx, true);
+      text_box = GRect(x + 8, y, width, CENTER_FONT_SIZE + 2);
+    }
+    if (i == 1 && text_reading) {
+      int width = bounds.size.w * MINUTE_INNER / 1000 - 4;
+      int height = CENTER_FONT_SIZE + 2 < 16 ? 16 : CENTER_FONT_SIZE + 2;
+      text_box = GRect(center.x - width / 2, y, width, height);
+    }
+    graphics_draw_text(ctx, lines[i], i == 1 && text_reading
+                         ? fonts_get_system_font(FONT_KEY_GOTHIC_14) : s_center_font,
+                       text_box, i == 1 && text_reading
+                         ? GTextOverflowModeTrailingEllipsis : GTextOverflowModeFill,
+                       GTextAlignmentCenter, NULL);
   }
 }
 
@@ -406,14 +520,20 @@ static void prv_tick(struct tm *tick_time, TimeUnits changed) {
   (void)tick_time;
   if (changed & MINUTE_UNIT) {
     prv_read_steps();
+    if (s_weather_unit && s_weather_expires && time(NULL) >= s_weather_expires) {
+      s_weather_unit = 0;
+      s_weather_expires = 0;
+      prv_clear_weather_icon();
+    }
+    if (s_music_expires && time(NULL) >= s_music_expires) {
+      s_music_title[0] = '\0';
+      s_music_expires = 0;
+    }
+    if (s_notifications_expire && time(NULL) >= s_notifications_expire) {
+      s_notification_count = 0;
+      s_notifications_expire = 0;
+    }
   }
-  if (s_in_focus) {
-    layer_mark_dirty(s_dial_layer);
-  }
-}
-
-static void prv_battery(BatteryChargeState state) {
-  (void)state;
   if (s_in_focus) {
     layer_mark_dirty(s_dial_layer);
   }
@@ -515,11 +635,115 @@ static bool prv_integer_tuple(const Tuple *tuple) {
       && tuple->length == sizeof(int32_t);
 }
 
+static void prv_clear_weather_icon(void) {
+  if (s_weather_icon) {
+    gbitmap_destroy(s_weather_icon);
+    s_weather_icon = NULL;
+  }
+}
+
+static void prv_clear_center_slots(void) {
+  for (int i = 0; i < 5; i++) {
+    if (s_center_slots[i].icon) gbitmap_destroy(s_center_slots[i].icon);
+    memset(&s_center_slots[i], 0, sizeof(s_center_slots[i]));
+  }
+}
+
+static void prv_battery(BatteryChargeState state) {
+  (void)state;
+  if (s_in_focus) {
+    layer_mark_dirty(s_dial_layer);
+  }
+}
+
+static void prv_update_center_display(void) {
+  if (prv_center_enabled(CenterBattery) && !s_battery_subscribed) {
+    battery_state_service_subscribe(prv_battery);
+    s_battery_subscribed = true;
+  } else if (!prv_center_enabled(CenterBattery) && s_battery_subscribed) {
+    battery_state_service_unsubscribe();
+    s_battery_subscribed = false;
+  }
+  if (!prv_center_enabled(CenterWeather)) {
+    s_weather_unit = 0;
+    s_weather_expires = 0;
+    prv_clear_weather_icon();
+  }
+  if (!prv_center_enabled(CenterMusic)) { s_music_title[0] = '\0'; s_music_expires = 0; }
+  if (!prv_center_enabled(CenterNotifications)) { s_notification_count = 0; s_notifications_expire = 0; }
+  if (!prv_center_enabled(CenterPlugin)) prv_clear_center_slots();
+}
+
+static bool prv_valid_center_order(uint32_t order) {
+  uint32_t seen = 0;
+  bool ended = false;
+  if (order >> 15) return false;
+  for (int i = 0; i < 5; i++) {
+    uint32_t value = (order >> (i * 3)) & 7;
+    if (!value) { ended = true; continue; }
+    if (ended || value > 6 || (seen & (1u << value))) return false;
+    seen |= 1u << value;
+  }
+  return true;
+}
+
+static void prv_set_icon(GBitmap **target, const Tuple *pixels, const Tuple *palette) {
+  if (*target) { gbitmap_destroy(*target); *target = NULL; }
+  if (!pixels && !palette) {
+    return;
+  }
+  if (!pixels || !palette || pixels->type != TUPLE_BYTE_ARRAY ||
+      palette->type != TUPLE_BYTE_ARRAY || pixels->length != 50 || palette->length != 16) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid weather icon");
+    return;
+  }
+  GColor *colors = malloc(16);
+  if (!colors) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not allocate weather icon palette");
+    return;
+  }
+  memcpy(colors, palette->value->data, 16);
+  GBitmap *bitmap = gbitmap_create_blank_with_palette(GSize(10, 10), GBitmapFormat4BitPalette,
+                                                       colors, true);
+  if (!bitmap) {
+    free(colors);
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not allocate weather icon");
+    return;
+  }
+  uint8_t *data = gbitmap_get_data(bitmap);
+  uint16_t stride = gbitmap_get_bytes_per_row(bitmap);
+  if (!data || stride < 5) {
+    gbitmap_destroy(bitmap);
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid weather bitmap");
+    return;
+  }
+  for (int row = 0; row < 10; row++) {
+    memcpy(data + row * stride, pixels->value->data + row * 5, 5);
+  }
+  *target = bitmap;
+}
+
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   (void)context;
   Tuple *seconds = dict_find(iter, MESSAGE_KEY_ShowSeconds);
   Tuple *goal = dict_find(iter, MESSAGE_KEY_StepGoal);
   Tuple *disable_steps = dict_find(iter, MESSAGE_KEY_DisableSteps);
+  Tuple *weather_unit = dict_find(iter, MESSAGE_KEY_WeatherUnit);
+  Tuple *temperature = dict_find(iter, MESSAGE_KEY_WeatherTemperature);
+  Tuple *pixels = dict_find(iter, MESSAGE_KEY_WeatherPixels);
+  Tuple *palette = dict_find(iter, MESSAGE_KEY_WeatherPalette);
+  Tuple *expires = dict_find(iter, MESSAGE_KEY_WeatherExpires);
+  Tuple *center = dict_find(iter, MESSAGE_KEY_CenterDisplay);
+  Tuple *order = dict_find(iter, MESSAGE_KEY_CenterOrder);
+  Tuple *music = dict_find(iter, MESSAGE_KEY_MusicTitle);
+  Tuple *notifications = dict_find(iter, MESSAGE_KEY_NotificationCount);
+  Tuple *music_expires = dict_find(iter, MESSAGE_KEY_MusicExpires);
+  Tuple *notifications_expire = dict_find(iter, MESSAGE_KEY_NotificationsExpire);
+  Tuple *slot_reset = dict_find(iter, MESSAGE_KEY_SlotReset);
+  Tuple *slot_index = dict_find(iter, MESSAGE_KEY_SlotIndex);
+  Tuple *slot_kind = dict_find(iter, MESSAGE_KEY_SlotKind);
+  Tuple *slot_text = dict_find(iter, MESSAGE_KEY_SlotText);
+  Tuple *slot_expires = dict_find(iter, MESSAGE_KEY_SlotExpires);
   if (seconds && (!prv_integer_tuple(seconds) || seconds->value->uint32 > DialSecondsOnShake)) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "invalid ShowSeconds setting");
     return;
@@ -530,6 +754,51 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   }
   if (disable_steps && (!prv_integer_tuple(disable_steps) || disable_steps->value->uint32 > 1)) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "invalid DisableSteps setting");
+    return;
+  }
+  if (center && (!prv_integer_tuple(center) || center->value->uint32 > CenterWeather)) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid CenterDisplay setting");
+    return;
+  }
+  if (order && (!prv_integer_tuple(order) || !prv_valid_center_order(order->value->uint32))) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid CenterOrder setting");
+    return;
+  }
+  if (music && (music->type != TUPLE_CSTRING || music->length < 1 ||
+      music->length > sizeof(s_music_title) ||
+      memchr(music->value, '\0', music->length) !=
+        (const char *)music->value + music->length - 1)) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid music title");
+    return;
+  }
+  if (notifications && (!prv_integer_tuple(notifications) || notifications->value->uint32 > 999)) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid notification count");
+    return;
+  }
+  if ((music_expires && (!prv_integer_tuple(music_expires) || music_expires->value->int32 < 0)) ||
+      (notifications_expire && (!prv_integer_tuple(notifications_expire) ||
+                                notifications_expire->value->int32 < 0))) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid source expiry");
+    return;
+  }
+  if (weather_unit && (!prv_integer_tuple(weather_unit) || weather_unit->value->uint32 > 2 ||
+      (expires && (!prv_integer_tuple(expires) || expires->value->int32 < 0)) ||
+      (weather_unit->value->uint32 != 0 &&
+       (!temperature || !prv_integer_tuple(temperature) || temperature->value->int32 < -99 ||
+        temperature->value->int32 > 999)))) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid weather reading");
+    return;
+  }
+  if ((slot_reset && (!prv_integer_tuple(slot_reset) || slot_reset->value->uint32 != 1)) ||
+      ((slot_index || slot_kind || slot_text || slot_expires) &&
+       (!slot_index || !prv_integer_tuple(slot_index) || slot_index->value->uint32 >= 5 ||
+        !slot_kind || !prv_integer_tuple(slot_kind) || slot_kind->value->uint32 > 3 ||
+        !slot_text || slot_text->type != TUPLE_CSTRING || slot_text->length < 1 ||
+        slot_text->length > sizeof(s_center_slots[0].text) ||
+        memchr(slot_text->value, '\0', slot_text->length) !=
+          (const char *)slot_text->value + slot_text->length - 1 ||
+        !slot_expires || !prv_integer_tuple(slot_expires) || slot_expires->value->int32 < 0))) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "invalid complication slot");
     return;
   }
   if (seconds) {
@@ -553,8 +822,72 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     }
     prv_update_step_counter();
   }
-  if (s_in_focus && (seconds || goal || disable_steps)) {
+  if (order || center) {
+    s_center_order = order ? order->value->uint32 : center->value->uint32 + 1;
+    if (persist_write_int(SETTINGS_KEY_CENTER_ORDER, s_center_order) < 0) {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "could not save CenterOrder");
+    }
+    prv_update_center_display();
+  }
+  if (weather_unit && prv_center_enabled(CenterWeather)) {
+    s_weather_unit = weather_unit->value->int32;
+    if (s_weather_unit && expires && expires->value->int32 &&
+        time(NULL) >= expires->value->int32) {
+      s_weather_unit = 0;
+    }
+    if (s_weather_unit) {
+      s_weather_temperature = temperature->value->int32;
+      s_weather_expires = expires ? expires->value->int32 : 0;
+      prv_set_icon(&s_weather_icon, pixels, palette);
+    } else {
+      s_weather_expires = 0;
+      prv_clear_weather_icon();
+    }
+  }
+  if (music && prv_center_enabled(CenterMusic)) {
+    memcpy(s_music_title, music->value->data, music->length);
+    s_music_expires = music_expires ? music_expires->value->int32 : 0;
+    if (s_music_expires && time(NULL) >= s_music_expires) s_music_title[0] = '\0';
+  }
+  if (notifications && prv_center_enabled(CenterNotifications)) {
+    s_notification_count = notifications->value->int32;
+    s_notifications_expire = notifications_expire ? notifications_expire->value->int32 : 0;
+    if (s_notifications_expire && time(NULL) >= s_notifications_expire) s_notification_count = 0;
+  }
+  if (prv_center_enabled(CenterPlugin) && slot_reset) prv_clear_center_slots();
+  if (prv_center_enabled(CenterPlugin) && slot_index) {
+    CenterSlot *slot = &s_center_slots[slot_index->value->uint32];
+    memcpy(slot->text, slot_text->value->data, slot_text->length);
+    slot->kind = slot_kind->value->uint32;
+    slot->expires = slot_expires->value->int32;
+    prv_set_icon(&slot->icon, pixels, palette);
+  }
+  if (s_in_focus && (seconds || goal || disable_steps || center || order || weather_unit ||
+                     music || notifications || slot_reset || slot_index)) {
     layer_mark_dirty(s_dial_layer);
+  }
+}
+
+static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
+  (void)iter;
+  (void)context;
+  APP_LOG(APP_LOG_LEVEL_ERROR, "weather request failed: %d", reason);
+}
+
+static void prv_request_weather(void) {
+  DictionaryIterator *iter = NULL;
+  AppMessageResult result = app_message_outbox_begin(&iter);
+  if (result != APP_MSG_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not start weather request: %d", result);
+    return;
+  }
+  if (dict_write_uint8(iter, MESSAGE_KEY_RequestWeather, 1) != DICT_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not write weather request");
+    return;
+  }
+  result = app_message_outbox_send();
+  if (result != APP_MSG_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "could not send weather request: %d", result);
   }
 }
 
@@ -668,17 +1001,38 @@ static bool prv_init(void) {
       APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved DisableSteps setting");
     }
   }
+  if (persist_exists(SETTINGS_KEY_CENTER_ORDER)) {
+    int32_t order = persist_read_int(SETTINGS_KEY_CENTER_ORDER);
+    if (persist_get_size(SETTINGS_KEY_CENTER_ORDER) == (int)sizeof(int32_t)
+        && prv_valid_center_order(order)) {
+      s_center_order = order;
+    } else {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved CenterOrder setting");
+    }
+  } else if (persist_exists(SETTINGS_KEY_CENTER_DISPLAY)) {
+    int32_t center = persist_read_int(SETTINGS_KEY_CENTER_DISPLAY);
+    if (persist_get_size(SETTINGS_KEY_CENTER_DISPLAY) == (int)sizeof(int32_t)
+        && center >= CenterBattery && center <= CenterWeather) {
+      s_center_order = center + 1;
+    } else {
+      APP_LOG(APP_LOG_LEVEL_ERROR, "invalid saved CenterDisplay setting");
+    }
+  }
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
-  AppMessageResult result = app_message_open(128, 64);
+  app_message_register_outbox_failed(prv_outbox_failed);
+  AppMessageResult result = app_message_open(256, 64);
   if (result != APP_MSG_OK) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "could not open settings messaging: %d", result);
+  } else if (prv_center_enabled(CenterWeather) || prv_center_enabled(CenterMusic)
+             || prv_center_enabled(CenterNotifications) || prv_center_enabled(CenterPlugin)) {
+    prv_request_weather();
   }
+  prv_update_center_display();
   prv_update_step_counter();
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick);
   prv_update_seconds_mode();
   app_focus_service_subscribe(prv_focus);
-  battery_state_service_subscribe(prv_battery);
   s_services_started = true;
   return true;
 }
@@ -689,16 +1043,21 @@ static void prv_deinit(void) {
     prv_cancel_glance();
     accel_tap_service_unsubscribe();
     app_focus_service_unsubscribe();
+    if (s_battery_subscribed) {
+      battery_state_service_unsubscribe();
+      s_battery_subscribed = false;
+    }
 #if defined(PBL_HEALTH)
     if (s_health_subscribed) {
       health_service_events_unsubscribe();
       s_health_subscribed = false;
     }
 #endif
-    battery_state_service_unsubscribe();
     app_message_deregister_callbacks();
     s_services_started = false;
   }
+  prv_clear_weather_icon();
+  prv_clear_center_slots();
   if (s_window) {
     window_destroy(s_window);
     s_window = NULL;

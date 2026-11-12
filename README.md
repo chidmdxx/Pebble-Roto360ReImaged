@@ -8,10 +8,10 @@ This is an independent remake inspired by [Roto360](https://apps.repebble.com/ro
 
 ## How it reads
 
-The time sits under the blue shield fixed at the top of the dial. The outer ring holds the hours and the inner ring holds the minutes in steps of five, and the rings turn so the current hour and minute stay under the shield. The minute box shows the exact minute and sits in front of the minute ring: nearby labels keep their regular spacing and pass underneath it, becoming partially obscured as they approach each five-minute mark. The center shows the weekday, battery level and date.
+The time sits under the blue shield fixed at the top of the dial. The outer ring holds the hours and the inner ring holds the minutes in steps of five, and the rings turn so the current hour and minute stay under the shield. The minute box shows the exact minute and sits in front of the minute ring: nearby labels keep their regular spacing and pass underneath it, becoming partially obscured as they approach each five-minute mark. The center shows the weekday, the selected display and the date.
 
 - Follows the watch's 12-hour or 24-hour setting. In 12-hour mode the hour ring reads 01 to 12.
-- Battery turns red at 20% or below. While charging it shows a green `+`, for example `+80%`.
+- The center display defaults to battery. Optionally, it shows the first available readable entry in Pebble's complication order, followed by a Battery or Nothing fallback. Music falls through when paused, and a notification entry shows a bell and phone notification count, falling through at zero. Weather uses the selected location and Pebble temperature units, with the plugin's condition image when available.
 - Round watches draw circular rings. Rectangular watches draw a rounded-square bezel with the numbers running along the edges.
 - The three center lines are vertically centered as a group. Font sizes and spacing keep the full weekday, including Wednesday, clear of the minute ring on every supported watch.
 - A thin blue seconds marker travels clockwise around the edge of the center, with no number or text.
@@ -30,23 +30,24 @@ Open the watchface's settings in the Pebble phone app to configure:
 
 - **Daily step goal:** a whole number from 1 to 100,000; defaults to 8,000. This changes only the watchface's target, not Pebble Health's goal.
 - **Seconds marker:** **Off**, **Always**, or **10 seconds after wrist shake / tap**. Existing on/off preferences are preserved; new installs default to Always. Shake mode shows seconds for 10 seconds after a detected gesture, then hides the marker and returns to minute ticks. Another gesture restarts that interval. Motion detection depends on the watch and is not guaranteed to match a wrist raise.
+- **Center display:** enable **Enable plugin complications (preview; off by default)** to use the order configured under **Settings → Plugins → Complications** in the Pebble app. Choose Battery percentage or Nothing for when plugins are off or unavailable; Battery percentage with plugins off is the default. To return to battery percentage, turn plugins off and select Battery percentage. Readable text and numeric entries are supported; unsupported or unavailable entries are skipped. The watch retains the latest readings until they expire, even if the phone disconnects.
 - **Disable step counter (conserve battery):** off by default, preserving step progress on existing installs. Enable it to hide both the step arc and unavailable-data dash and stop this face's Health reads and event subscription. Re-enable the counter to immediately refresh today's steps. The saved goal and seconds mode are unchanged; Pebble Health continues tracking activity independently.
 
 Enable Pebble Health in the Pebble phone app to supply steps. The face reads today's on-watch total, listens for Health updates, and checks again each minute, including after midnight. An amber dash at the bottom of the bezel means step data is unavailable; it is not shown as zero progress. No step or sleep data is sent to the phone or a server. The settings are saved on both the phone and watch and reapplied when they reconnect.
 
 ### Battery use
 
-Off and idle shake mode subscribe to minute ticks, not hidden second ticks. Always and an active shake interval update each second. Seconds also pause when a notification covers the face; shake intervals are cancelled on focus loss. Step progress uses the existing Health service rather than a separate accelerometer step counter. Battery changes and changed step totals also trigger updates. To avoid step-related reads and updates as well, enable **Disable step counter**; this is independent of seconds mode, not an automatic low-battery threshold.
+Off and idle shake mode subscribe to minute ticks, not hidden second ticks. Always and an active shake interval update each second. Seconds also pause when a notification covers the face; shake intervals are cancelled on focus loss. Step progress uses the existing Health service rather than a separate accelerometer step counter. Weather and changed step totals also trigger updates. To avoid step-related reads and updates as well, enable **Disable step counter**; this is independent of seconds mode, not an automatic low-battery threshold.
 
 This follows Pebble's [battery guidance](https://developer.repebble.com/guides/best-practices/conserving-battery-life/): reduce wakeups, offer a seconds-off option, and limit animation to gestures. **Off** gives the fewest animation wakeups; shake mode is a compromise. The [Health guide](https://developer.repebble.com/guides/events-and-services/health/#detecting-activities) also suggests suppressing animation during detected sleep, but this face does not change seconds behavior based on sleep. Emulator checks do not measure real-watch battery life.
 
-The small phone companion provides an embedded, offline settings page. It makes no network requests and needs no hosted page or third-party packages.
+The phone companion provides an embedded, offline settings page. Shared complications use the Pebble app's [plugin preview](https://developer.repebble.com/guides/plugins/preview/): enable **Settings → Plugins → Plugins / permissions preview**, choose readings under **Settings → Plugins → Complications**, and enable the watchface's preview setting. Allow the relevant permissions if prompted. For weather, configure a location and units in the Pebble app. The companion subscribes to the selected sources and forwards their readings to the watch; the face makes no direct network requests and needs no API key. Text readings prefer the plugin's short text, falling back to long text when needed. Built-in Music and Notifications sources are Android-only. A selected notification entry displays the phone's dismissible notification-shade count instead of its chosen field or instance; ongoing entries and group summaries are excluded. Plugins are disabled by default and the preview API may change.
 
 If the dial's resources or layer cannot be loaded, the face logs the failure and shows **ROTO360 ERROR / RESTART WATCHFACE** instead of a dial with missing time digits. Restart the face; if the error persists, reinstall it. A window allocation failure is logged but cannot display an error screen.
 
 ## Build and install
 
-You need the [Pebble SDK](https://developer.repebble.com/sdk.md). The project CI uses Pebble CLI 5.0.40 with SDK 4.33.1. On Windows, use WSL.
+You need the [Pebble SDK](https://developer.repebble.com/sdk.md). The project CI uses Pebble CLI 5.1.1 with SDK 4.44 for plugin permissions. On Windows, use WSL.
 
 ```text
 cd app
@@ -75,7 +76,7 @@ The tools in `tools/` need Python 3 and Pillow:
 
 - `app/src/c/main.c`: layout, rings, shield and center text.
 - `app/src/c/dial.c`: time, label and ring geometry logic with no SDK dependency.
-- `app/src/pkjs/index.js`: offline phone settings for seconds mode and daily step goal.
+- `app/src/pkjs/index.js`: offline phone settings and opt-in plugin subscriptions.
 - `app/src/c/numerals.c`: draws rotated, antialiased digits from the atlas.
 - `store/`: emulator screenshots, banners and icons for the Pebble appstore.
 - `tests/`: Node.js tests and the native dial test.

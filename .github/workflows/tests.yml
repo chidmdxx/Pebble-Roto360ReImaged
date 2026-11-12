@@ -70,9 +70,9 @@ jobs:
       - name: Install Pebble CLI and SDK
         run: |
           python3 -m venv "$RUNNER_TEMP/pebble"
-          "$RUNNER_TEMP/pebble/bin/pip" install pebble-tool==5.0.40
+          "$RUNNER_TEMP/pebble/bin/pip" install pebble-tool==5.1.1
           echo "$RUNNER_TEMP/pebble/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/pebble/bin/pebble" sdk install 4.33.1
+          "$RUNNER_TEMP/pebble/bin/pebble" sdk install 4.44
       - name: Build every supported platform
         working-directory: app
         run: pebble build
